@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  backend:
+    name: Python lint + test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: "--health-cmd pg_isready --health-interval 5s \
+          --health-timeout 5s --health-retries 5"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Ruff lint
+        run: ruff check src_back/
+
+      - name: Run pytest
+        env:
+          DATABASE_URL: postgresql://app:app@localhost:5432/app
+          FLASK_ENV: testing
+          SECRET_KEY: ci-secret
+        run: pytest
+
+  frontend:
+    name: TypeScript lint + test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier check
+        run: npx prettier --check src_front/src
+
+      - name: Vitest
+        run: npm test

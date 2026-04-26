@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# Lint Python
+.venv/bin/ruff check src_back/
+
+# Lint TypeScript
+npm run lint
+
+# Format check
+npx prettier --check src_front/src
