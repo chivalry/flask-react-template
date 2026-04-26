@@ -33,7 +33,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173>.
+Open <http://localhost:5174> (or whatever `FRONTEND_PORT` is set to in `.env`).
 
 ## Docker
 
@@ -41,7 +41,29 @@ Open <http://localhost:5173>.
 docker-compose up --build
 ```
 
-Open <http://localhost:5173>.
+Open <http://localhost:5174> (or whatever `FRONTEND_PORT` is set to in `.env`).
+
+## Running multiple instances
+
+If you run more than one project simultaneously, each needs unique ports.
+Check what is already in use:
+
+```bash
+./scripts/check-ports.sh
+```
+
+Then edit `.env` and increment `FRONTEND_PORT` and `BACKEND_PORT` for each
+additional instance:
+
+```sh
+# First instance (default)
+FRONTEND_PORT=5174
+BACKEND_PORT=5000
+
+# Second instance
+FRONTEND_PORT=5175
+BACKEND_PORT=5001
+```
 
 ## Project layout
 
