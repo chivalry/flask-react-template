@@ -1,25 +1,29 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
-import { CssBaseline, ThemeProvider, createTheme } from "@mui/material";
-import App from "./App";
+import { CssBaseline, ThemeProvider, createTheme } from '@mui/material'
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
+
+import App from './App'
+import ErrorBoundary from './components/ErrorBoundary'
 
 const theme = createTheme({
   palette: {
-    mode: "light",
+    mode: 'light',
   },
-});
+})
 
-const root = document.getElementById("root");
-if (!root) throw new Error("Root element not found");
+const root = document.getElementById('root')
+if (!root) throw new Error('Root element not found')
 
 createRoot(root).render(
   <StrictMode>
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ThemeProvider>
+    </ErrorBoundary>
   </StrictMode>,
-);
+)

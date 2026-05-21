@@ -43,6 +43,7 @@ jobs:
           DATABASE_URL: postgresql://app:app@localhost:5432/app
           FLASK_ENV: testing
           SECRET_KEY: ci-secret
+          RATELIMIT_ENABLED: "0"
         run: pytest
 
   frontend:

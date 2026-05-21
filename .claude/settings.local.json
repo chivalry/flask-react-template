@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/chuck/Projects/chivalry/ts-subscription-site/src_front/src/**)",
+      "Read(//Users/chuck/Projects/chivalry/ts-subscription-site/src_front/src/test/**)",
+      "Bash(cat /Users/chuck/Projects/chivalry/ts-subscription-site/requirements.txt)",
+      "Read(//Users/chuck/Projects/chivalry/ts-subscription-site/**)",
+      "Bash(cat /Users/chuck/Projects/chivalry/ts-subscription-site/pyproject.toml)"
+    ]
+  }
+}

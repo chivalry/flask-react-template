@@ -1,4 +1,2 @@
 #!/bin/sh
-.venv/bin/ruff check src_back/
-npm run lint
-npx prettier --check src_front/src
+npx lint-staged

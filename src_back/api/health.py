@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify
 
-bp = Blueprint("api", __name__)
+bp = Blueprint("health", __name__)
 
 
 @bp.get("/health")
