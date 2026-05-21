@@ -236,6 +236,9 @@ build/
 .env.test.local
 .env.production.local
 
+# macOS
+.DS_Store
+
 # Editor/tool caches
 .eslintcache
 .parcel-cache
