@@ -38,31 +38,24 @@ Open <http://localhost:5174> (or whatever `FRONTEND_PORT` is set to in `.env`).
 ## Docker
 
 ```bash
-docker-compose up --build
+npm run docker:up
 ```
 
-Open <http://localhost:5174> (or whatever `FRONTEND_PORT` is set to in `.env`).
+This automatically detects which ports are free on your machine and assigns
+them before starting the containers — so multiple projects can run
+simultaneously without port conflicts. The resolved ports are printed at
+startup and written to `.env`.
 
-## Running multiple instances
-
-If you run more than one project simultaneously, each needs unique ports.
-Check what is already in use:
+To rebuild images before starting:
 
 ```bash
-./scripts/check-ports.sh
+npm run docker:up:build
 ```
 
-Then edit `.env` and increment `FRONTEND_PORT` and `BACKEND_PORT` for each
-additional instance:
+To stop containers:
 
-```sh
-# First instance (default)
-FRONTEND_PORT=5174
-BACKEND_PORT=5000
-
-# Second instance
-FRONTEND_PORT=5175
-BACKEND_PORT=5001
+```bash
+npm run docker:down
 ```
 
 ## Project layout
@@ -92,13 +85,18 @@ project/
 
 ## Scripts
 
-| Command                  | Description            |
-| ------------------------ | ---------------------- |
-| `npm run dev`            | Start Vite dev server  |
-| `npm run build`          | Production build       |
-| `npm run lint`           | ESLint                 |
-| `npm run format`         | Prettier               |
-| `npm test`               | Vitest (run once)      |
-| `flask ... run`          | Start Flask dev server |
-| `pytest`                 | Python tests           |
-| `ruff check src_back/`   | Python linter          |
+| Command                     | Description                            |
+| --------------------------- | -------------------------------------- |
+| `npm run docker:up`         | Start containers (auto-assigns ports)  |
+| `npm run docker:up:build`   | Rebuild images then start containers   |
+| `npm run docker:down`       | Stop and remove containers             |
+| `npm run docker:build`      | Build images without starting          |
+| `npm run docker:logs`       | Tail container logs                    |
+| `npm run dev`               | Start Vite dev server (no Docker)      |
+| `npm run build`             | Production build                       |
+| `npm run lint`              | ESLint                                 |
+| `npm run format`            | Prettier                               |
+| `npm test`                  | Vitest (run once)                      |
+| `flask ... run`             | Start Flask dev server (no Docker)     |
+| `pytest`                    | Python tests                           |
+| `ruff check src_back/`      | Python linter                          |

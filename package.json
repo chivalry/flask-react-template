@@ -15,7 +15,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepare": "husky"
+    "prepare": "husky",
+    "docker:up": "sh scripts/up.sh",
+    "docker:up:build": "sh scripts/up.sh --build",
+    "docker:down": "sh scripts/down.sh",
+    "docker:build": "docker compose build",
+    "docker:logs": "docker compose logs -f"
   },
   "lint-staged": {
     "src_front/src/**/*.{ts,tsx}": [
