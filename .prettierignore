@@ -1,0 +1,7 @@
+.claude/
+plans/
+dist/
+htmlcov/
+coverage/
+*.min.js
+eslint.config.js

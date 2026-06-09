@@ -16,11 +16,15 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "prepare": "husky",
+    "fallow": "fallow audit",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"!node_modules/**\" \"!.venv/**\" \"!dist/**\" \"!htmlcov/**\" \"!coverage/**\"",
     "docker:up": "sh scripts/up.sh",
     "docker:up:build": "sh scripts/up.sh --build",
     "docker:down": "sh scripts/down.sh",
     "docker:build": "docker compose build",
-    "docker:logs": "docker compose logs -f"
+    "docker:logs": "docker compose logs -f",
+    "docker:prod:up": "docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml up -d",
+    "docker:prod:down": "docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml down"
   },
   "lint-staged": {
     "src_front/src/**/*.{ts,tsx}": [
@@ -30,7 +34,8 @@
     "src_back/**/*.py": [
       ".venv/bin/ruff check --fix",
       ".venv/bin/ruff format"
-    ]
+    ],
+    "*.md": ["markdownlint-cli2 --fix", "prettier --write"]
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -63,10 +68,12 @@
     "husky": "^9.1.7",
     "jsdom": "^29.1.1",
     "lint-staged": "^17.0.5",
+    "fallow": "^2.86.0",
+    "markdownlint-cli2": "^0.17.0",
     "prettier": "^3.4.2",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.22.0",
     "vite": "^6.1.0",
-    "vitest": "^3.0.5"
+    "vitest": "^4.1.7"
   }
 }

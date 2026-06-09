@@ -1,0 +1,61 @@
+{
+  "name": "flask-react-template",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+        "editor.rulers": [90],
+        "editor.codeLens": false,
+        "diffEditor.ignoreTrimWhitespace": false,
+        "explorer.confirmDelete": false,
+        "explorer.confirmDragAndDrop": false,
+        "git.enableSmartCommit": true,
+        "git.confirmSync": false,
+        "fallow.duplication.mode": "strict",
+        "fallow.production": true
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.debugpy",
+        "charliermarsh.ruff",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "github.vscode-pull-request-github",
+        "github.vscode-github-actions",
+        "ms-azuretools.vscode-docker",
+        "davidanson.vscode-markdownlint",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "editorconfig.editorconfig",
+        "streetsidesoftware.code-spell-checker",
+        "usernamehw.errorlens",
+        "yoavbls.pretty-ts-errors",
+        "timonwong.shellcheck",
+        "fallow-rs.fallow-vscode",
+        "christian-kohler.npm-intellisense",
+        "anthropic.claude-code",
+        "ziyasal.vscode-open-in-github"
+      ]
+    }
+  },
+  "forwardPorts": [5000, 5174],
+  "portsAttributes": {
+    "5000": {
+      "label": "Flask API",
+      "onAutoForward": "notify"
+    },
+    "5174": {
+      "label": "Vite Dev Server",
+      "onAutoForward": "openBrowser"
+    }
+  },
+  "postCreateCommand": "python -m venv .venv && .venv/bin/pip install -r requirements.txt && npm install"
+}

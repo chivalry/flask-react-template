@@ -46,6 +46,25 @@ jobs:
           RATELIMIT_ENABLED: "0"
         run: pytest
 
+  fallow:
+    name: Fallow duplication audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fallow audit
+        run: npm run fallow
+
   frontend:
     name: TypeScript lint + test
     runs-on: ubuntu-latest
@@ -67,6 +86,10 @@ jobs:
 
       - name: Prettier check
         run: npx prettier --check src_front/src
+
+      - name: markdownlint
+        run: npm run lint:md
+
 
       - name: Vitest
         run: npm test

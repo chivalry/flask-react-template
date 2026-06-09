@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "src_front/src/test/**/*.ts",
+    "src_front/src/test/**/*.tsx",
+    "src_front/src/main.tsx"
+  ],
+  "ignorePatterns": [
+    "src_front/index.html",
+    "src_front/coverage/**",
+    "src_front/src/types/**",
+    "src_front/src/styles/**"
+  ]
+}
