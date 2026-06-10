@@ -1,12 +1,11 @@
-import { zodResolver } from '@hookform/resolvers/zod'
-import { Alert, Box, Button, Container, TextField, Typography } from '@mui/material'
-import { useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { Link, useNavigate } from 'react-router-dom'
-import { z } from 'zod'
+import { zodResolver } from '@hookform/resolvers/zod';
+import { Alert, Box, Button, Container, TextField, Typography } from '@mui/material';
+import { useForm } from 'react-hook-form';
+import { Link } from 'react-router-dom';
+import { z } from 'zod';
 
-import { login, me, register as registerUser } from '../api/auth'
-import { useAuthStore } from '../store/auth'
+import { login, register as registerUser } from '../api/auth';
+import { useAuthFormState } from '../hooks/useAuthFormState';
 
 const schema = z
   .object({
@@ -17,36 +16,24 @@ const schema = z
   .refine((d) => d.password === d.confirmPassword, {
     message: 'Passwords do not match.',
     path: ['confirmPassword'],
-  })
+  });
 
-type FormData = z.infer<typeof schema>
+type FormData = z.infer<typeof schema>;
 
 export default function Register() {
-  const navigate = useNavigate()
-  const setUser = useAuthStore((s) => s.setUser)
-  const [apiError, setApiError] = useState<string | null>(null)
+  const { apiError, handleAuthAction } = useAuthFormState();
 
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<FormData>({ resolver: zodResolver(schema) })
+  } = useForm<FormData>({ resolver: zodResolver(schema) });
 
-  const onSubmit = async (data: FormData) => {
-    setApiError(null)
-    try {
-      await registerUser(data.email, data.password)
-      await login(data.email, data.password)
-      const { data: user } = await me()
-      setUser(user)
-      navigate('/')
-    } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-        'Registration failed.'
-      setApiError(msg)
-    }
-  }
+  const onSubmit = (data: FormData) =>
+    handleAuthAction(async () => {
+      await registerUser(data.email, data.password);
+      await login(data.email, data.password);
+    }, 'Registration failed.');
 
   return (
     <Container maxWidth="xs" sx={{ mt: 8 }}>
@@ -100,5 +87,5 @@ export default function Register() {
         </Typography>
       </Box>
     </Container>
-  )
+  );
 }

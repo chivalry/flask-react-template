@@ -1,45 +1,30 @@
-import { zodResolver } from '@hookform/resolvers/zod'
-import { Alert, Box, Button, Container, TextField, Typography } from '@mui/material'
-import { useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { Link, useNavigate } from 'react-router-dom'
-import { z } from 'zod'
+import { zodResolver } from '@hookform/resolvers/zod';
+import { Alert, Box, Button, Container, TextField, Typography } from '@mui/material';
+import { useForm } from 'react-hook-form';
+import { Link } from 'react-router-dom';
+import { z } from 'zod';
 
-import { login, me } from '../api/auth'
-import { useAuthStore } from '../store/auth'
+import { login } from '../api/auth';
+import { useAuthFormState } from '../hooks/useAuthFormState';
 
 const schema = z.object({
   email: z.string().email('Enter a valid email.'),
   password: z.string().min(1, 'Password is required.'),
-})
+});
 
-type FormData = z.infer<typeof schema>
+type FormData = z.infer<typeof schema>;
 
 export default function Login() {
-  const navigate = useNavigate()
-  const setUser = useAuthStore((s) => s.setUser)
-  const [apiError, setApiError] = useState<string | null>(null)
+  const { apiError, handleAuthAction } = useAuthFormState();
 
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<FormData>({ resolver: zodResolver(schema) })
+  } = useForm<FormData>({ resolver: zodResolver(schema) });
 
-  const onSubmit = async (data: FormData) => {
-    setApiError(null)
-    try {
-      await login(data.email, data.password)
-      const { data: user } = await me()
-      setUser(user)
-      navigate('/')
-    } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-        'Login failed.'
-      setApiError(msg)
-    }
-  }
+  const onSubmit = (data: FormData) =>
+    handleAuthAction(() => login(data.email, data.password), 'Login failed.');
 
   return (
     <Container maxWidth="xs" sx={{ mt: 8 }}>
@@ -84,5 +69,5 @@ export default function Login() {
         </Typography>
       </Box>
     </Container>
-  )
+  );
 }
