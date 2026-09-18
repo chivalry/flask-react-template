@@ -1,5 +1,14 @@
+import uuid
+from datetime import UTC
 
-from src_back.utils import admin_required, paginate, pagination_args
+from src_back.utils import (
+    admin_required,
+    new_uuid,
+    not_found,
+    now,
+    paginate,
+    pagination_args,
+)
 
 
 def test_paginate_first_page():
@@ -62,7 +71,6 @@ def test_pagination_args_invalid_values(app):
 def test_admin_required_allows_admin(app, admin_user):
     from flask import Blueprint, jsonify
 
-
     bp = Blueprint("test_admin", __name__)
 
     @bp.get("/test-admin")
@@ -83,7 +91,6 @@ def test_admin_required_allows_admin(app, admin_user):
 def test_admin_required_blocks_regular_user(app, user):
     from flask import Blueprint, jsonify
 
-
     bp = Blueprint("test_user", __name__)
 
     @bp.get("/test-user")
@@ -99,3 +106,18 @@ def test_admin_required_blocks_regular_user(app, user):
     )
     r = client.get("/test-user")
     assert r.status_code == 403
+
+
+def test_not_found_returns_json_404(app):
+    with app.app_context():
+        response, status = not_found()
+    assert status == 404
+    assert response.get_json() == {"error": "Not found"}
+
+
+def test_now_returns_utc_aware_datetime():
+    assert now().tzinfo is UTC
+
+
+def test_new_uuid_returns_version_4_uuid():
+    assert uuid.UUID(new_uuid()).version == 4

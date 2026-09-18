@@ -7,23 +7,23 @@ import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
 
 const theme = createTheme({
-  palette: {
-    mode: 'light',
-  },
+    palette: {
+        mode: 'light',
+    },
 })
 
 const root = document.getElementById('root')
 if (!root) throw new Error('Root element not found')
 
 createRoot(root).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </ThemeProvider>
-    </ErrorBoundary>
-  </StrictMode>,
+    <StrictMode>
+        <ErrorBoundary>
+            <ThemeProvider theme={theme}>
+                <CssBaseline />
+                <BrowserRouter>
+                    <App />
+                </BrowserRouter>
+            </ThemeProvider>
+        </ErrorBoundary>
+    </StrictMode>,
 )

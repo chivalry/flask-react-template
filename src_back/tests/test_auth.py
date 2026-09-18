@@ -61,6 +61,11 @@ def test_login_unknown_email(client):
     assert r.status_code == 401
 
 
+def test_login_invalid_payload(client):
+    r = client.post("/api/v1/auth/login", json={"email": "not-an-email"})
+    assert r.status_code == 400
+
+
 def test_logout_success(auth_client):
     r = auth_client.post("/api/v1/auth/logout")
     assert r.status_code == 200
@@ -73,6 +78,14 @@ def test_logout_unauthenticated(client):
 
 def test_me_authenticated(auth_client, user):
     r = auth_client.get("/api/v1/auth/me")
+    assert r.status_code == 200
+    assert r.get_json()["email"] == user.email
+
+
+def test_me_loads_user_from_session_cookie(app, auth_client, user):
+    # A fresh app context has no cached user, so Flask-Login must call the user loader.
+    with app.app_context():
+        r = auth_client.get("/api/v1/auth/me")
     assert r.status_code == 200
     assert r.get_json()["email"] == user.email
 

@@ -10,6 +10,7 @@ jobs:
   backend:
     name: Python lint + test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -24,10 +25,10 @@ jobs:
           --health-timeout 5s --health-retries 5"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -40,7 +41,7 @@ jobs:
 
       - name: Run pytest
         env:
-          DATABASE_URL: postgresql://app:app@localhost:5432/app
+          TEST_DATABASE_URL: postgresql://app:app@localhost:5432/app
           FLASK_ENV: testing
           SECRET_KEY: ci-secret
           RATELIMIT_ENABLED: "0"
@@ -49,12 +50,13 @@ jobs:
   fallow:
     name: Fallow duplication audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "npm"
@@ -68,12 +70,13 @@ jobs:
   frontend:
     name: TypeScript lint + test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "npm"

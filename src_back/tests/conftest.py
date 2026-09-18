@@ -11,17 +11,20 @@ from src_back.models import User  # noqa: E402
 
 @pytest.fixture()
 def app():
-    app = create_app()
-    app.config.update(
+    app = create_app(
         {
             "TESTING": True,
-            "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+            "SQLALCHEMY_DATABASE_URI": os.environ.get(
+                "TEST_DATABASE_URL", "sqlite:///:memory:"
+            ),
             "WTF_CSRF_ENABLED": False,
         }
     )
     with app.app_context():
         _db.create_all()
         yield app
+        # Release the session's locks first; on Postgres they block DROP TABLE forever.
+        _db.session.remove()
         _db.drop_all()
 
 
