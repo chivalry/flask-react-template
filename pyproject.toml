@@ -13,5 +13,6 @@ addopts = "--cov=src_back --cov-fail-under=100"
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
 ]
 omit = ["src_back/tests/*", "migrations/*"]

@@ -1,5 +1,6 @@
 import uuid as uuid_lib
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from flask_login import UserMixin
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -26,6 +27,11 @@ class BaseMixin:
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+    # db.Model's annotated type omits SQLAlchemy's keyword constructor.
+    if TYPE_CHECKING:
+
+        def __init__(self, **kwargs: Any) -> None: ...
 
 
 class User(UserMixin, BaseMixin, db.Model):

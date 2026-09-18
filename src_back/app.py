@@ -2,7 +2,7 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from src_back.extensions import db, login_manager, migrate
@@ -63,7 +63,7 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
     def not_found_handler(_e):
         if request.path.startswith("/api"):
             return jsonify({"error": "Not found"}), 404
-        return send_from_directory(app.static_folder, "index.html")
+        return app.send_static_file("index.html")
 
     @app.errorhandler(500)
     def server_error_handler(_e):
@@ -71,6 +71,6 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
 
     @app.get("/")
     def index():
-        return send_from_directory(app.static_folder, "index.html")
+        return app.send_static_file("index.html")
 
     return app
