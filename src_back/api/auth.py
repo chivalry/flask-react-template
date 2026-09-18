@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required, login_user, logout_user
 from marshmallow import ValidationError
@@ -15,7 +17,7 @@ _user_schema = UserSchema()
 @bp.post("/register")
 def register():
     try:
-        data = _user_schema.load(request.get_json() or {})
+        data = cast(dict[str, Any], _user_schema.load(request.get_json() or {}))
     except ValidationError as e:
         return bad_request(str(e.messages))
     try:
@@ -29,7 +31,7 @@ def register():
 @bp.post("/login")
 def login():
     try:
-        data = _login_schema.load(request.get_json() or {})
+        data = cast(dict[str, Any], _login_schema.load(request.get_json() or {}))
     except ValidationError as e:
         return bad_request(str(e.messages))
     user = authenticate_user(data["email"], data["password"])

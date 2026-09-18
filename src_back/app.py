@@ -1,7 +1,8 @@
 import os
+from typing import Any
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from src_back.extensions import db, login_manager, migrate
@@ -9,7 +10,7 @@ from src_back.extensions import db, login_manager, migrate
 load_dotenv()
 
 
-def create_app() -> Flask:
+def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
     app = Flask(__name__, static_folder="../dist", static_url_path="/")
 
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret")
@@ -24,6 +25,8 @@ def create_app() -> Flask:
     app.config["SESSION_COOKIE_SECURE"] = (
         os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
     )
+    if config_overrides:
+        app.config.update(config_overrides)
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -60,7 +63,7 @@ def create_app() -> Flask:
     def not_found_handler(_e):
         if request.path.startswith("/api"):
             return jsonify({"error": "Not found"}), 404
-        return send_from_directory(app.static_folder, "index.html")
+        return app.send_static_file("index.html")
 
     @app.errorhandler(500)
     def server_error_handler(_e):
@@ -68,6 +71,6 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
-        return send_from_directory(app.static_folder, "index.html")
+        return app.send_static_file("index.html")
 
     return app
