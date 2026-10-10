@@ -7,6 +7,9 @@ export default defineConfig(({ mode }) => {
 
     return {
         root: 'src_front',
+        // Keep Vite's cache beside the root node_modules instead of creating
+        // a stray src_front/node_modules directory.
+        cacheDir: '../node_modules/.vite',
         plugins: [react()],
         resolve: {
             alias: {
@@ -17,6 +20,10 @@ export default defineConfig(({ mode }) => {
             port: parseInt(process.env.FRONTEND_PORT ?? '5174'),
             proxy: {
                 '/api': {
+                    target: apiTarget,
+                    changeOrigin: true,
+                },
+                '/uploads': {
                     target: apiTarget,
                     changeOrigin: true,
                 },
@@ -32,7 +39,12 @@ export default defineConfig(({ mode }) => {
             setupFiles: './src/test/setup.ts',
             coverage: {
                 provider: 'v8',
-                reporter: ['text', 'json'],
+                reporter: ['text', 'lcov'],
+                // Paths are relative to `root`. Listing every source file means
+                // an untested module counts against the thresholds instead of
+                // being invisible to them.
+                include: ['src/**/*.{ts,tsx}'],
+                exclude: ['src/test/**', 'src/main.tsx'],
                 thresholds: {
                     lines: 100,
                     functions: 100,

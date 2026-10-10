@@ -10,5 +10,6 @@
     "src_front/coverage/**",
     "src_front/src/types/**",
     "src_front/src/styles/**"
-  ]
+  ],
+  "ignoreDependencies": ["@emotion/react", "@emotion/styled"]
 }

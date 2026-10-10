@@ -1,102 +1,160 @@
 # Flask React Template
 
-A minimal full-stack template: **Flask** (Python) backend +
-**React 18** (TypeScript + Vite) frontend.
+A full-stack starting point: **Flask** (Python) backend and **React 18** (TypeScript +
+Vite) frontend, with session authentication, image-upload scaffolding, 100% test
+coverage on both sides, strict linting and typing, Docker for development and
+production, and scripts to provision and deploy a single server.
 
 ## Stack
 
-| Layer    | Technology                                    |
-| -------- | --------------------------------------------- |
-| Backend  | Flask, SQLAlchemy, Flask-Migrate, Flask-CORS  |
-| Database | PostgreSQL 16                                 |
-| Frontend | React 18, TypeScript, Vite, MUI, Axios        |
-| Tooling  | Ruff, Pytest, ESLint, Prettier, Husky, Vitest |
+| Layer    | Technology                                                   |
+| -------- | ------------------------------------------------------------ |
+| Backend  | Flask, SQLAlchemy 2, Flask-Migrate, Flask-Login, marshmallow |
+| Database | PostgreSQL 16                                                |
+| Frontend | React 18, TypeScript, Vite, MUI, Axios, Zustand, Zod         |
+| Tooling  | Ruff, basedpyright, pydoclint, pytest, ESLint, Prettier,     |
+|          | Vitest, fallow, Husky, markdownlint                          |
 
 ## Quick start (local, no Docker)
 
 ```bash
-# 1. Clone and enter the repo
-git clone <your-repo-url>
-cd flask-react-template
+git clone <your-repo-url> my-app
+cd my-app
 
-# 2. Copy and edit environment file
-cp .env.example .env
+cp .env.example .env             # FLASK_ENV=development is already set
 
-# 3. Backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-flask --app src_back.app db upgrade
-flask --app src_back.app run
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+docker compose up -d db          # or point DATABASE_URL at your own PostgreSQL
+.venv/bin/flask --app src_back.app db upgrade
+.venv/bin/flask --app src_back.app run
 
-# 4. Frontend (new terminal)
-npm install
+npm install                      # in a second terminal
 npm run dev
 ```
 
-Open <http://localhost:5174> (or whatever `FRONTEND_PORT` is set to in `.env`).
+Open <http://localhost:5174> (or whatever `FRONTEND_PORT` is set to in `.env`) and
+register an account. Promote it to `admin` in the database when you need the
+admin-only routes.
 
 ## Docker
 
 ```bash
-npm run docker:up
-```
-
-This automatically detects which ports are free on your machine and assigns
-them before starting the containers — so multiple projects can run
-simultaneously without port conflicts. The resolved ports are printed at
-startup and written to `.env`.
-
-To rebuild images before starting:
-
-```bash
-npm run docker:up:build
-```
-
-To stop containers:
-
-```bash
+npm run docker:up        # start; picks free ports and writes them to .env
+npm run docker:url       # wait for the frontend and print its URL
+npm run docker:up:build  # rebuild images first
 npm run docker:down
 ```
+
+The backend container runs migrations and the seed on every start. Uploaded files live
+in the `uploads_data` volume, so they survive rebuilds.
+
+## Worktrees
+
+The repo works as a bare-repo container with one worktree per branch:
+
+```bash
+git clone --bare <your-repo-url> my-app && cd my-app
+git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'  # bare clones skip it
+git worktree add main
+sh main/scripts/worktree-setup.sh feature/thing 1
+```
+
+`scripts/worktree-setup.sh` creates the worktree, copies `.env` from `main/`, gives the
+stack its own `COMPOSE_PROJECT_NAME` and ports shifted by the offset, installs the venv
+and `node_modules`, and points `core.hooksPath` at `.husky`, so several worktrees run
+side by side.
+
+## Scripts
+
+| Command                   | Description                                     |
+| ------------------------- | ----------------------------------------------- |
+| `npm run dev`             | Vite dev server (no Docker)                     |
+| `npm run build`           | Type check (`tsc -b`) and production build      |
+| `npm run typecheck`       | `tsc -b` only                                   |
+| `npm test`                | Frontend and backend suites, both with coverage |
+| `npm run test:front`      | Vitest with 100% thresholds                     |
+| `npm run test:back`       | pytest with 100% coverage enforced              |
+| `npm run test:watch`      | Vitest in watch mode                            |
+| `npm run lint`            | ESLint (CI adds `--max-warnings=0`)             |
+| `npm run lint:py`         | Ruff, pydoclint, function length, basedpyright  |
+| `npm run lint:md`         | markdownlint                                    |
+| `npm run format`          | Prettier over the repository                    |
+| `npm run format:py`       | Ruff format                                     |
+| `npm run fallow`          | Duplication and dead-code audit                 |
+| `npm run docker:up`       | Start containers (auto-assigns ports)           |
+| `npm run docker:up:build` | Rebuild images then start containers            |
+| `npm run docker:url`      | Print the running frontend's URL                |
+| `npm run docker:seed`     | Run the seed inside the backend container       |
+| `npm run docker:logs`     | Tail container logs                             |
+| `npm run docker:down`     | Stop and remove containers                      |
+| `npm run docker:prod:up`  | Start the production stack locally              |
+| `npm run deploy`          | Deploy to `DEPLOY_HOST` (or a host argument)    |
 
 ## Project layout
 
 ```text
 project/
+├── ai/                # Project instructions for agents (see below)
 ├── src_back/          # Flask application
-│   ├── app.py         # Application factory
-│   ├── models.py      # SQLAlchemy models (BaseMixin)
-│   ├── utils.py       # Shared helpers
-│   ├── api/           # Blueprint routes
-│   ├── seed.py        # Database seed stub
-│   └── tests/         # Pytest suite
+│   ├── app.py         # Application factory, error handlers, SPA and uploads
+│   ├── extensions.py  # db (SQLAlchemy 2 Base), migrate, login_manager
+│   ├── models.py      # BaseMixin, Role, User
+│   ├── utils.py       # Error envelopes, pagination, parsing, upload checks
+│   ├── api/           # Blueprints (health, auth)
+│   ├── schemas/       # Marshmallow schemas; base.py has BaseSchema
+│   ├── services/      # Business logic; base.py has the generic CRUD services
+│   ├── seed.py        # Idempotent seed entry point
+│   └── tests/         # pytest suite
 ├── src_front/         # React application
-│   ├── index.html
 │   └── src/
-│       ├── main.tsx   # Entry point
-│       ├── App.tsx    # Root component + router
-│       ├── api/       # Axios client
-│       ├── components/
-│       └── pages/
-├── migrations/        # Alembic migrations
-├── docker/            # Dockerfiles + entrypoint
-├── .github/workflows/ # CI
-└── docker-compose.yml
+│       ├── api/       # Axios client with interceptors; typed API modules
+│       ├── components/  AppShell, ProtectedRoute, AuthFormLayout, ErrorBoundary
+│       ├── hooks/     # useApiError, useAuthFormState
+│       ├── pages/     # Home, Login, Register
+│       ├── store/     # Zustand auth store
+│       ├── types/     # AuthUser, PaginatedResponse
+│       └── test/      # Vitest suite
+├── migrations/        # Alembic migrations (initial schema included)
+├── docker/            # Dockerfiles, entrypoint, nginx, production override
+├── scripts/           # Ports, worktrees, provisioning, deploy, TLS, backups
+├── plans/             # Implementation plans
+└── .github/workflows/ # CI, issue auto-assign
 ```
 
-## Scripts
+## Agent instructions
 
-| Command                     | Description                            |
-| --------------------------- | -------------------------------------- |
-| `npm run docker:up`         | Start containers (auto-assigns ports)  |
-| `npm run docker:up:build`   | Rebuild images then start containers   |
-| `npm run docker:down`       | Stop and remove containers             |
-| `npm run docker:build`      | Build images without starting          |
-| `npm run docker:logs`       | Tail container logs                    |
-| `npm run dev`               | Start Vite dev server (no Docker)      |
-| `npm run build`             | Production build                       |
-| `npm run lint`              | ESLint                                 |
-| `npm run format`            | Prettier                               |
-| `npm test`                  | Vitest (run once)                      |
-| `flask ... run`             | Start Flask dev server (no Docker)     |
-| `pytest`                    | Python tests                           |
-| `ruff check src_back/`      | Python linter                          |
+`ai/project.md`, `ai/conventions.md`, and `ai/domain.md` are the canonical project
+instructions; `ai/backups.md` and `ai/tls.md` are the operations runbooks. `AGENTS.md`
+and `.claude/CLAUDE.md` are thin adapters that point at them. `.claude/settings.json`
+runs `tsc -b` after every TypeScript edit and assigns new GitHub issues to the
+repository owner.
+
+## Uploads
+
+`validate_image_file()` in `src_back/utils.py` checks the extension and sniffs the MIME
+type; stored files are served, login-protected, from `/uploads/<filename>`; bodies over
+25 MB get a JSON 413. Set `UPLOAD_FOLDER` in `.env`; under Docker the `uploads_data`
+volume persists files across rebuilds.
+
+## Deployment
+
+The production stack runs on one Ubuntu host behind host nginx with Let's Encrypt.
+Database and backend ports are bound to loopback; only nginx faces the network.
+
+On the server:
+
+```bash
+git clone <your-repo-url> ~/my-app && cd ~/my-app
+bash scripts/provision.sh example.com                # packages, Docker, nginx, .env
+bash scripts/certbot-setup.sh --email you@example.com  # first certificate, after DNS
+```
+
+`provision.sh` writes `.env` with generated secrets; review it before deploying.
+
+Then, from your machine, `DEPLOY_HOST=root@example.com npm run deploy`.
+`scripts/deploy.sh` backs up the database before migrating, rebuilds the containers,
+installs the nginx site, and enables certificate monitoring. Once the `SPACES_*`
+variables are filled in, `bash scripts/install-backup.sh` enables nightly off-site
+backups with alerts on failure. `ai/backups.md` and `ai/tls.md` cover restores,
+alerts, and renewals.

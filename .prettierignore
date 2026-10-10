@@ -1,7 +1,9 @@
 .claude/
+.fallow/
 plans/
 dist/
-htmlcov/
 coverage/
+htmlcov/
+package-lock.json
 *.min.js
 eslint.config.js

@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src_back/ ./src_back/
 COPY migrations/ ./migrations/
+COPY docker/entrypoint.sh docker/entrypoint.sh
 
 EXPOSE 5000
 

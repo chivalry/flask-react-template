@@ -1,0 +1,9 @@
+# Rendered by scripts/deploy.sh: __APP_NAME__ and __REPO_DIR__ come from the server's
+# .env and clone location; installed as <APP_NAME>-cert-check.service.
+[Unit]
+Description=__APP_NAME__ TLS certificate expiry check
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_DIR__
+ExecStart=/bin/bash __REPO_DIR__/scripts/cert-check.sh
