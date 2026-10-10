@@ -1,0 +1,48 @@
+# Host nginx site for the production stack. scripts/deploy.sh renders __DOMAIN__,
+# __BACKEND_PORT__, and __FRONTEND_HOST_PORT__ from .env and installs the result as
+# /etc/nginx/sites-available/<APP_NAME>. Do not edit the installed copy; it is
+# overwritten on every deploy.
+server {
+    listen 80;
+    server_name __DOMAIN__;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name __DOMAIN__;
+
+    ssl_certificate     /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    client_max_body_size 25m;
+
+    # nginx rejects oversized bodies itself; answer with the application's JSON 413
+    # envelope instead of the default HTML page. Browsers may still report a reset
+    # on very large uploads because nginx closes the connection early.
+    error_page 413 = @payload_too_large;
+    location @payload_too_large {
+        default_type application/json;
+        return 413 '{"error": "File is too large. Maximum size is 25 MB."}';
+    }
+
+    # Whole-segment match, like the Flask 404 handler and the Vite proxy: bare
+    # /api and /uploads reach the backend too, while /api-docs stays with the SPA.
+    location ~ ^/(api|uploads)(/|$) {
+        proxy_pass http://127.0.0.1:__BACKEND_PORT__;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:__FRONTEND_HOST_PORT__;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

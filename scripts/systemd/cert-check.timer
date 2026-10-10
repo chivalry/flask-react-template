@@ -1,0 +1,10 @@
+# Rendered by scripts/deploy.sh; installed as <APP_NAME>-cert-check.timer.
+[Unit]
+Description=Daily __APP_NAME__ TLS certificate expiry check
+
+[Timer]
+OnCalendar=*-*-* 05:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

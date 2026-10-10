@@ -245,3 +245,14 @@ build/
 .next/
 .nuxt/
 .vite/
+
+# Coverage output (vitest writes under src_front/)
+coverage/
+src_front/coverage/
+
+# Uploaded files (keep the folder, not its contents)
+src_back/uploads/*
+!src_back/uploads/.gitkeep
+
+# Claude Code per-machine settings
+.claude/settings.local.json

@@ -7,35 +7,45 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "typecheck": "tsc -b",
     "lint": "eslint src_front/src",
     "lint:fix": "eslint src_front/src --fix",
-    "format": "prettier --write src_front/src",
-    "lint:py": ".venv/bin/ruff check src_back",
-    "format:py": ".venv/bin/ruff format src_back",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "prepare": "husky",
+    "format": "prettier --write .",
+    "lint:py": ".venv/bin/ruff check src_back scripts && .venv/bin/ruff format --check src_back scripts && .venv/bin/pydoclint src_back scripts && .venv/bin/python scripts/check_function_length.py src_back scripts && .venv/bin/basedpyright",
+    "format:py": ".venv/bin/ruff format src_back scripts",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"!node_modules/**\" \"!.venv/**\" \"!dist/**\" \"!htmlcov/**\" \"!coverage/**\" \"!src_front/coverage/**\" \"!plans/**\"",
     "fallow": "fallow audit",
-    "lint:md": "markdownlint-cli2 \"**/*.md\" \"!node_modules/**\" \"!.venv/**\" \"!dist/**\" \"!htmlcov/**\" \"!coverage/**\"",
+    "test": "run-p test:front test:back",
+    "test:front": "vitest run --coverage",
+    "test:back": ".venv/bin/python -m pytest",
+    "test:watch": "vitest",
+    "prepare": "husky",
     "docker:up": "sh scripts/up.sh",
     "docker:up:build": "sh scripts/up.sh --build",
     "docker:down": "sh scripts/down.sh",
     "docker:build": "docker compose build",
     "docker:logs": "docker compose logs -f",
+    "docker:url": "sh scripts/docker-url.sh",
+    "docker:seed": "docker compose exec -T backend python -m src_back.seed",
     "docker:prod:up": "docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml up -d",
-    "docker:prod:down": "docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml down"
+    "docker:prod:down": "docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml down",
+    "deploy": "bash scripts/remote-deploy.sh"
   },
   "lint-staged": {
     "src_front/src/**/*.{ts,tsx}": [
       "eslint --fix",
       "prettier --write"
     ],
-    "src_back/**/*.py": [
+    "{src_back,scripts}/**/*.py": [
       ".venv/bin/ruff check --fix",
-      ".venv/bin/ruff format"
+      ".venv/bin/ruff format",
+      ".venv/bin/pydoclint",
+      ".venv/bin/python scripts/check_function_length.py"
     ],
-    "*.md": ["markdownlint-cli2 --fix", "prettier --write"]
+    "*.md": [
+      "markdownlint-cli2 --fix",
+      "prettier --write"
+    ]
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -62,14 +72,16 @@
     "@vitejs/plugin-react": "^4.3.4",
     "@vitest/coverage-v8": "^4.1.7",
     "eslint": "^9.19.0",
+    "eslint-plugin-jsdoc": "^62.9.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.19",
+    "fallow": "^2.86.0",
     "globals": "^15.14.0",
     "husky": "^9.1.7",
     "jsdom": "^29.1.1",
     "lint-staged": "^17.0.5",
-    "fallow": "^2.86.0",
     "markdownlint-cli2": "^0.17.0",
+    "npm-run-all2": "^8.0.4",
     "prettier": "^3.4.2",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.22.0",

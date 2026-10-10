@@ -1,0 +1,14 @@
+.git
+.venv
+node_modules
+dist
+coverage
+src_front/coverage
+htmlcov
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.fallow
+instance
+.env
+plans

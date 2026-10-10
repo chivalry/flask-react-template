@@ -1,10 +1,13 @@
+/** @file Account registration page. */
+
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Alert, Box, Button, Container, TextField, Typography } from '@mui/material'
 import { useForm } from 'react-hook-form'
+import type { FieldErrors, UseFormRegister } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { z } from 'zod'
 
-import { login, register as registerUser } from '../api/auth'
+import { register as registerUser } from '../api/auth'
+import AuthFormLayout, { AuthTextField } from '../components/AuthFormLayout'
 import { useAuthFormState } from '../hooks/useAuthFormState'
 
 const schema = z
@@ -18,8 +21,53 @@ const schema = z
         path: ['confirmPassword'],
     })
 
+/** The registration form's validated values. */
 type FormData = z.infer<typeof schema>
 
+/** Props accepted by {@link RegisterFields}. */
+interface RegisterFieldsProps {
+    register: UseFormRegister<FormData>
+    errors: FieldErrors<FormData>
+}
+
+/**
+ * Render the registration form's three credential fields.
+ *
+ * @param props - The component props.
+ * @param props.register - The form's field registrar.
+ * @param props.errors - The form's current validation errors.
+ * @returns The credential fields.
+ */
+function RegisterFields({ register, errors }: RegisterFieldsProps) {
+    return (
+        <>
+            <AuthTextField
+                registration={register('email')}
+                label="Email"
+                type="email"
+                error={errors.email?.message}
+            />
+            <AuthTextField
+                registration={register('password')}
+                label="Password"
+                type="password"
+                error={errors.password?.message}
+            />
+            <AuthTextField
+                registration={register('confirmPassword')}
+                label="Confirm password"
+                type="password"
+                error={errors.confirmPassword?.message}
+            />
+        </>
+    )
+}
+
+/**
+ * Render the registration form and create the account on submit.
+ *
+ * @returns The registration page element.
+ */
 export default function Register() {
     const { apiError, handleAuthAction } = useAuthFormState()
 
@@ -29,63 +77,32 @@ export default function Register() {
         formState: { errors, isSubmitting },
     } = useForm<FormData>({ resolver: zodResolver(schema) })
 
+    /**
+     * Create the account; the server signs the new user in on the same request.
+     *
+     * @param data - The validated form values.
+     * @returns A promise that settles when registration completes.
+     */
     const onSubmit = (data: FormData) =>
-        handleAuthAction(async () => {
-            await registerUser(data.email, data.password)
-            await login(data.email, data.password)
-        }, 'Registration failed.')
+        handleAuthAction(
+            () => registerUser(data.email, data.password),
+            'Registration failed.',
+        )
 
     return (
-        <Container maxWidth="xs" sx={{ mt: 8 }}>
-            <Typography variant="h5" gutterBottom>
-                Create account
-            </Typography>
-            {apiError && (
-                <Alert severity="error" sx={{ mb: 2 }}>
-                    {apiError}
-                </Alert>
-            )}
-            <Box component="form" onSubmit={handleSubmit(onSubmit)} noValidate>
-                <TextField
-                    {...register('email')}
-                    label="Email"
-                    type="email"
-                    fullWidth
-                    margin="normal"
-                    error={!!errors.email}
-                    helperText={errors.email?.message}
-                />
-                <TextField
-                    {...register('password')}
-                    label="Password"
-                    type="password"
-                    fullWidth
-                    margin="normal"
-                    error={!!errors.password}
-                    helperText={errors.password?.message}
-                />
-                <TextField
-                    {...register('confirmPassword')}
-                    label="Confirm password"
-                    type="password"
-                    fullWidth
-                    margin="normal"
-                    error={!!errors.confirmPassword}
-                    helperText={errors.confirmPassword?.message}
-                />
-                <Button
-                    type="submit"
-                    variant="contained"
-                    fullWidth
-                    sx={{ mt: 2 }}
-                    disabled={isSubmitting}
-                >
-                    {isSubmitting ? 'Creating account…' : 'Create account'}
-                </Button>
-                <Typography variant="body2" sx={{ mt: 2 }}>
+        <AuthFormLayout
+            title="Create account"
+            apiError={apiError}
+            isSubmitting={isSubmitting}
+            submitLabel={isSubmitting ? 'Creating account…' : 'Create account'}
+            footer={
+                <>
                     Already have an account? <Link to="/login">Sign in</Link>
-                </Typography>
-            </Box>
-        </Container>
+                </>
+            }
+            onSubmit={handleSubmit(onSubmit)}
+        >
+            <RegisterFields register={register} errors={errors} />
+        </AuthFormLayout>
     )
 }

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: ['**']
   pull_request:
-    branches: ["**"]
+    branches: ['**']
 
 jobs:
   backend:
@@ -30,22 +30,37 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
-          cache: "pip"
+          python-version: '3.12'
+          cache: 'pip'
 
+      # The venv mirrors local development, where every Python tool runs as
+      # .venv/bin/<tool>, and it is where pyproject.toml tells basedpyright to look.
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
 
       - name: Ruff lint
-        run: ruff check src_back/
+        run: .venv/bin/ruff check src_back scripts
+
+      - name: Ruff format check
+        run: .venv/bin/ruff format --check src_back scripts
+
+      - name: Docstring lint
+        run: .venv/bin/pydoclint src_back scripts
+
+      - name: Function length
+        run: .venv/bin/python scripts/check_function_length.py src_back scripts
+
+      - name: Type check
+        run: .venv/bin/basedpyright
 
       - name: Run pytest
         env:
           TEST_DATABASE_URL: postgresql://app:app@localhost:5432/app
           FLASK_ENV: testing
           SECRET_KEY: ci-secret
-          RATELIMIT_ENABLED: "0"
-        run: pytest
+        run: .venv/bin/python -m pytest
 
   fallow:
     name: Fallow duplication audit
@@ -61,8 +76,8 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: "22"
-          cache: "npm"
+          node-version: '22'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
@@ -84,21 +99,40 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
-          node-version: "22"
-          cache: "npm"
+          node-version: '22'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
       - name: ESLint
-        run: npm run lint
+        run: npm run lint -- --max-warnings=0
 
       - name: Prettier check
-        run: npx prettier --check src_front/src
+        run: npx prettier --check .
 
       - name: markdownlint
         run: npm run lint:md
 
+      - name: Vitest with coverage
+        run: npm run test:front
 
-      - name: Vitest
-        run: npm test
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check and build
+        run: npm run build

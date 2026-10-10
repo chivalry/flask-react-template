@@ -1,0 +1,11 @@
+# Rendered by scripts/deploy.sh; installed as <APP_NAME>-alert-certbot.service and
+# triggered by the OnFailure= drop-in in certbot-onfailure.conf.
+[Unit]
+Description=Report a failed certbot renewal for __APP_NAME__
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_DIR__
+ExecStart=/bin/bash __REPO_DIR__/scripts/alert.sh \
+  "__APP_NAME__: certbot renewal FAILED" \
+  "certbot.service exited non-zero on %H. Inspect: journalctl -u certbot.service -n 50"

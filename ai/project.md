@@ -1,0 +1,84 @@
+# Project Instructions
+
+Replace "the application" below with the project's name and purpose when starting a
+project from this template. The sections describe the layout, the commands, and the
+database rules that every contributor and agent follows.
+
+## Project Structure
+
+- Backend: `src_back/` - Python/Flask
+    - `api/` - Flask route handlers, one blueprint per domain
+    - `models.py` - SQLAlchemy models; split into a `models/` package when it grows
+    - `schemas/` - Marshmallow schemas; `schemas/base.py` holds `BaseSchema`
+    - `services/` - business logic by domain; `services/base.py` holds the generic
+      `CRUDService` and `ChildRecordService`
+    - `tests/` - pytest; one `test_<module>.py` per module
+    - `app.py` - application factory, error handlers, SPA and upload serving
+    - `extensions.py` - shared Flask extensions and the declarative `Base`
+    - `utils.py` - error envelopes, pagination, request parsing, upload validation
+- Frontend: `src_front/src/` - React/TypeScript with Vite
+    - `api/` - axios client and typed API modules
+    - `components/` - React components; `components/layout/AppShell.tsx` is the shell
+    - `hooks/` - shared hooks
+    - `pages/` - top-level page components
+    - `store/` - Zustand stores
+    - `types/` - TypeScript types shared across modules
+    - `test/` - Vitest tests mirroring `src/`
+- `ai/` - these instructions; `AGENTS.md` and `.claude/CLAUDE.md` point here
+- `docker/` - Dockerfiles, entrypoint, nginx config, production Compose override
+- `migrations/` - Alembic migrations
+- `plans/` - implementation plans; authoritative while a feature is in progress
+- `scripts/` - local tooling (ports, worktrees) and server provisioning, deployment,
+  TLS, and backup scripts
+
+## Commands
+
+All commands run from the repo root via npm scripts. Python tooling always goes through
+`.venv/bin/`.
+
+- `npm run test` - frontend and backend suites in parallel, both with coverage
+- `npm run test:back` - `.venv/bin/python -m pytest` (100% coverage enforced)
+- `npm run test:front` - `vitest run --coverage` (100% thresholds)
+- `npm run lint` - ESLint; CI adds `--max-warnings=0`
+- `npm run lint:py` - Ruff check and format check, pydoclint, function length,
+  basedpyright
+- `npm run lint:md` - markdownlint
+- `npm run typecheck` - `tsc -b`
+- `npm run format` and `npm run format:py` - Prettier and Ruff format
+- `npm run fallow` - duplication and dead-code audit of the frontend
+- `npm run docker:up` - start the dev stack, assigning free ports into `.env`
+- `npm run docker:url` - wait for the dev frontend and print its URL
+- `npm run docker:seed` - run the seed inside the backend container
+- `npm run docker:down` - stop the dev stack
+- `npm run deploy` - deploy production over SSH (`DEPLOY_HOST` or an argument)
+
+## Database
+
+- PostgreSQL 16 in Docker and production. Tests use in-memory SQLite; CI also runs
+  them against PostgreSQL through `TEST_DATABASE_URL`.
+- SQLAlchemy 2.x: models subclass `Base` from `extensions.py` and use `Mapped[]` with
+  `mapped_column`. Every model mixes in `BaseMixin` (`id`, `uuid`, `created_at`,
+  `updated_at`).
+- Queries go through `db.session` (`db.session.get`, `db.session.query`); there is no
+  `Model.query`.
+- Migrations use Flask-Migrate/Alembic. Author with
+  `.venv/bin/flask --app src_back.app db migrate -m "<slug>"`, review the file, apply
+  with `db upgrade`. Files are named `YYYY_MM_DD_<rev>_<slug>.py`.
+- `docker/entrypoint.sh` owns migrations: it runs `db upgrade` and the seed on every
+  container start, in development and in production, and a non-zero exit stops the
+  container. Seeds skip optional work themselves instead of failing. `scripts/deploy.sh`
+  never runs `db upgrade` itself; it takes a database backup, restarts the stack, and
+  waits for `/api/health`, which the backend serves only after the entrypoint finishes.
+  This assumes one backend container; scaling it out means moving migrations into the
+  deploy step.
+- Run `flask` inside the container or through the venv, never with the system Python:
+  `docker compose exec -T backend flask --app src_back.app db upgrade` or
+  `.venv/bin/flask --app src_back.app ...`.
+- `.env` points `DATABASE_URL` at `localhost:$DB_PORT` for host-side commands; inside
+  Compose the backend uses the `db` hostname.
+
+## Environment
+
+`.env.example` documents every variable. `scripts/up.sh` rewrites the port variables
+when a port is busy; `scripts/worktree-setup.sh` shifts them per worktree. Outside
+`FLASK_ENV=development`, the app refuses to start with a placeholder `SECRET_KEY`.

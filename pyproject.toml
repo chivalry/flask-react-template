@@ -3,13 +3,51 @@ line-length = 90
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP"]
+select = ["E", "F", "W", "I", "UP", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"src_back/tests/*" = ["D"]
+"migrations/*" = ["D", "E501"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.pydoclint]
+style = "google"
+exclude = '\.venv|src_back/tests|migrations'
+# Ruff's D rules own docstring presence; pydoclint owns whether an existing
+# docstring agrees with the signature.
+skip-checking-short-docstrings = false
+arg-type-hints-in-docstring = false
+check-return-types = false
+# Column-by-column Attributes: blocks on the SQLAlchemy models would restate
+# the column definitions directly below them; class docstrings cover intent.
+check-class-attributes = false
+# Ruff's D107 requires a docstring on __init__, so pydoclint has to accept one
+# there and check the arguments against it rather than the class docstring.
+allow-init-docstring = true
+
+# Read by both basedpyright on the command line and Pylance in the editor, so
+# the two agree. typeCheckingMode is explicit because basedpyright's default is
+# far stricter than Pylance's and would report findings the editor never shows.
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+include = ["src_back", "scripts"]
+exclude = ["**/__pycache__", ".venv", "migrations"]
 
 [tool.pytest.ini_options]
 testpaths = ["src_back/tests"]
 addopts = "--cov=src_back --cov-fail-under=100"
 
 [tool.coverage.report]
+# Setting exclude_lines replaces coverage's defaults rather than extending them,
+# so the built-in TYPE_CHECKING exclusion has to be restated here.
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
