@@ -66,6 +66,12 @@ def test_crud_create_persists_data_and_extra_columns(db):
     assert service.create({'name': 'delta'}).name == 'delta'
 
 
+def test_crud_create_lets_explicit_keywords_win_over_body_values(db):
+    service = CRUDService(Widget, Widget.name)
+    created = service.create({'name': 'from-body'}, name='from-caller')
+    assert created.name == 'from-caller'
+
+
 def test_crud_update_sets_fields_and_returns_record(db):
     widget = _make_widget(db)
     updated = CRUDService(Widget, Widget.name).update(widget.id, {'name': 'renamed'})
@@ -131,6 +137,14 @@ def test_child_create_links_the_parent_and_extra_columns(db):
     assert created.widget_id == widget.id
     assert created.body == 'extra'
     assert service.create(widget.id, {'body': 'data'}).body == 'data'
+
+
+def test_child_create_url_parent_wins_over_parent_id_in_body(db):
+    owner, other = _make_widget(db, 'owner'), _make_widget(db, 'other')
+    service = ChildRecordService(WidgetNote, 'widget_id', WidgetNote.id)
+    created = service.create(owner.id, {'widget_id': other.id, 'body': 'routed'})
+    assert created.widget_id == owner.id
+    assert created.body == 'routed'
 
 
 def test_child_update_sets_fields_on_the_given_record(db):

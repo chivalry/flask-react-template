@@ -4,7 +4,7 @@ import type { AxiosResponse } from 'axios'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { login, me } from '../api/auth'
+import { login } from '../api/auth'
 import Login from '../pages/Login'
 import { useAuthStore } from '../store/auth'
 import type { AuthUser } from '../types/auth'
@@ -67,17 +67,15 @@ describe('Login', () => {
         expect(login).not.toHaveBeenCalled()
     })
 
-    it('signs in, loads the user, and navigates to / on success', async () => {
+    it('signs in, stores the user, and navigates to / on success', async () => {
         const user = userEvent.setup()
         vi.mocked(login).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
-        vi.mocked(me).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
         renderLogin()
 
         await signInWith(user, 'user@example.com', 'password123')
 
         expect(await screen.findByText('Home page')).toBeInTheDocument()
         expect(login).toHaveBeenCalledWith('user@example.com', 'password123')
-        expect(me).toHaveBeenCalledTimes(1)
         expect(useAuthStore.getState().user).toEqual(testUser)
     })
 
@@ -93,7 +91,6 @@ describe('Login', () => {
         expect(await screen.findByRole('alert')).toHaveTextContent(
             'Invalid email or password.',
         )
-        expect(me).not.toHaveBeenCalled()
         expect(useAuthStore.getState().user).toBeNull()
     })
 
@@ -116,7 +113,6 @@ describe('Login', () => {
                 resolveLogin = resolve
             }),
         )
-        vi.mocked(me).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
         renderLogin()
 
         await signInWith(user, 'user@example.com', 'password123')

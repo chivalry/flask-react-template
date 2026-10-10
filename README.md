@@ -46,8 +46,9 @@ npm run docker:up:build  # rebuild images first
 npm run docker:down
 ```
 
-The backend container runs migrations and the seed on every start. Uploaded files live
-in the `uploads_data` volume, so they survive rebuilds.
+The backend container runs migrations and the seed on every start; a seed that exits
+non-zero stops the container. Uploaded files live in the `uploads_data` volume, so they
+survive rebuilds.
 
 ## Worktrees
 

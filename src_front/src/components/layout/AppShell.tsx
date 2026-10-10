@@ -52,16 +52,12 @@ function UserMenu() {
     /**
      * Sign out, then return to the login page.
      *
-     * The navigation runs in a `finally` block, so a failed request still
-     * leaves the signed-in UI on this device; the store clears the user the
-     * same way.
+     * The store's `logout` never rejects: it clears the local user whether or
+     * not the request succeeded, so this handler only has to navigate.
      */
     const handleLogout = async () => {
-        try {
-            await logout()
-        } finally {
-            navigate('/login')
-        }
+        await logout()
+        navigate('/login')
     }
 
     return (

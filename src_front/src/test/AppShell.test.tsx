@@ -11,35 +11,6 @@ import type { AuthUser } from '../types/auth'
 
 vi.mock('../api/auth')
 
-type UnhandledRejectionListener = (reason: unknown, promise: Promise<unknown>) => void
-
-interface UnhandledRejectionEmitter {
-    listeners(eventName: 'unhandledRejection'): UnhandledRejectionListener[]
-    on(eventName: 'unhandledRejection', listener: UnhandledRejectionListener): void
-    removeAllListeners(eventName: 'unhandledRejection'): void
-}
-
-const rejectionEmitter = (globalThis as unknown as { process: UnhandledRejectionEmitter })
-    .process
-
-// handleLogout intentionally re-raises a logout API failure after its finally block
-// runs, and React discards the click handler's promise, so the rejection can only
-// surface as a process-level unhandled rejection. Swallow it for the wrapped action.
-const suppressUnhandledRejections = async (action: () => Promise<void>) => {
-    const originalListeners = rejectionEmitter.listeners('unhandledRejection')
-    rejectionEmitter.removeAllListeners('unhandledRejection')
-    rejectionEmitter.on('unhandledRejection', () => undefined)
-    try {
-        await action()
-        await new Promise((resolve) => setTimeout(resolve, 0))
-    } finally {
-        rejectionEmitter.removeAllListeners('unhandledRejection')
-        for (const listener of originalListeners) {
-            rejectionEmitter.on('unhandledRejection', listener)
-        }
-    }
-}
-
 const testUser: AuthUser = {
     id: 1,
     uuid: 'user-uuid-1',
@@ -129,11 +100,9 @@ describe('AppShell', () => {
         vi.mocked(logout).mockRejectedValue(new Error('logout request failed'))
         renderShell()
 
-        await suppressUnhandledRejections(async () => {
-            await user.click(screen.getByRole('button', { name: 'Logout' }))
-            expect(await screen.findByText('Login page')).toBeInTheDocument()
-        })
+        await user.click(screen.getByRole('button', { name: 'Logout' }))
 
+        expect(await screen.findByText('Login page')).toBeInTheDocument()
         expect(logout).toHaveBeenCalledTimes(1)
         expect(useAuthStore.getState().user).toBeNull()
     })

@@ -126,8 +126,13 @@ done
 
 # --- retention: keep newest N per tier/kind (timestamp names sort chronologically) ---
 prune() {  # remote-dir keep-count
-  local dir="$1" keep="$2" files count drop i
-  mapfile -t files < <(rclone lsf --files-only "$dir" 2>/dev/null | sort)
+  local dir="$1" keep="$2" listing files count drop i
+  # Capture the listing on its own: a failure inside a process substitution never
+  # reaches `set -e` or the ERR trap, so a broken listing would look like an empty
+  # directory and skip retention while the run still reported SUCCESS.
+  listing="$(rclone lsf --files-only "$dir")" || fail "rclone lsf failed for $dir"
+  [ -n "$listing" ] || return 0
+  mapfile -t files < <(printf '%s\n' "$listing" | sort)
   count="${#files[@]}"; drop=$(( count - keep ))
   [ "$drop" -gt 0 ] || return 0
   for (( i=0; i<drop; i++ )); do rclone deletefile "$dir/${files[$i]}"; done

@@ -66,9 +66,26 @@ if [ "$RESOLVED" != "$MY_IP" ]; then
   exit 1
 fi
 
+# Whatever is stopped below is started again on every exit path, success or
+# failure, so a certbot or verification error cannot leave the host web server down.
+STOPPED_SERVICES=()
+restore_services() {
+  local service
+  for service in "${STOPPED_SERVICES[@]}"; do
+    echo "==> Starting $service again..."
+    sudo systemctl start "$service" \
+      || echo "WARN: could not start $service; run: sudo systemctl start $service"
+  done
+}
+trap restore_services EXIT
+
 echo "==> Stopping any service on port 80..."
-sudo systemctl stop nginx 2>/dev/null || true
-sudo systemctl stop apache2 2>/dev/null || true
+for service in nginx apache2; do
+  if sudo systemctl is-active --quiet "$service"; then
+    sudo systemctl stop "$service"
+    STOPPED_SERVICES+=("$service")
+  fi
+done
 
 echo "==> Requesting certificate..."
 sudo certbot certonly --standalone -d "$DOMAIN" \
@@ -83,10 +100,6 @@ if ! sudo grep -qx 'authenticator = nginx' "$RENEWAL_CONF"; then
   echo "       Renewals would fail to bind port 80 once nginx is running."
   exit 1
 fi
-
-# Leave the host as it was found: nginx was stopped above so standalone could bind :80.
-echo "==> Starting nginx again..."
-sudo systemctl start nginx
 
 echo ""
 echo "==> Certificate obtained."

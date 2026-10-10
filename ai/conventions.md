@@ -21,7 +21,8 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - Services in `src_back/services/` own business logic. Reuse `CRUDService` for
   top-level resources and `ChildRecordService` for nested ones. Its
   `get_for_parent()` is how nested routes validate parent ownership before mutating;
-  `require_parent()` in `utils.py` answers 404 when the parent is missing.
+  `require_parent()` in `utils.py` answers 404 when the parent is missing, and
+  `create()` makes the URL's parent id win over any parent id in the body.
 - Schemas extend `BaseSchema` (marshmallow-sqlalchemy auto schema with
   `load_instance = False`), set `Meta.model`, and mark `BaseSchema.AUDIT` dump-only.
   Auto schemas omit foreign-key columns; a child schema that accepts the parent id
@@ -49,8 +50,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - The axios client (`api/client.ts`) uses `baseURL: '/api'` and `withCredentials`.
   Its interceptors copy the server's `error` text onto `error.message` and notify the
   auth store on a 401.
-- The Zustand auth store holds the signed-in user; `fetchMe()` runs on mount and
-  `ProtectedRoute` waits for it before redirecting. Pages render inside `AppShell`.
+- The Zustand auth store holds the signed-in user. `fetchMe()` runs once on mount and
+  `ProtectedRoute` waits for it; login and register store the user from their own
+  response, and a `/me` response that lands after a sign-in or sign-out is discarded
+  as stale. Pages render inside `AppShell`.
 - Forms use React Hook Form with Zod schemas; request errors surface through
   `useApiError`.
 - Every file starts with a `@file` JSDoc block, and every function, interface, and

@@ -59,12 +59,14 @@ class CRUDService(Generic[T]):
         Args:
             data: Validated column values, typically a loaded schema payload.
             **extra: Further column values the caller supplies, such as the
-                owning user's id.
+                owning user's id. These win over the same keys in ``data``.
 
         Returns:
             The committed record.
         """
-        record = self._model(**data, **extra)
+        # Merge before unpacking: spreading two mappings that share a key raises
+        # TypeError, and a keyword the caller passes explicitly should win.
+        record = self._model(**{**data, **extra})
         db.session.add(record)
         db.session.commit()
         return record
@@ -182,14 +184,18 @@ class ChildRecordService(Generic[T]):
         """Create and persist a child record linked to the given parent.
 
         Args:
-            parent_id: The parent's primary key.
+            parent_id: The parent's primary key, which wins over any parent id
+                carried in ``data`` by a schema that sets ``include_fk``.
             data: Validated column values, typically a loaded schema payload.
             **extra: Further column values the caller supplies.
 
         Returns:
             The committed record.
         """
-        record = self._model(**{self._parent_fk: parent_id}, **data, **extra)
+        # Merge before unpacking so a parent id in the body neither raises
+        # TypeError for the duplicate keyword nor redirects the child to another
+        # parent; the URL is the authority on ownership.
+        record = self._model(**{**data, **extra, self._parent_fk: parent_id})
         db.session.add(record)
         db.session.commit()
         return record

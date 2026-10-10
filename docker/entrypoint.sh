@@ -4,8 +4,10 @@ set -e
 echo "Running database migrations..."
 flask --app src_back.app db upgrade
 
+# A non-zero exit here stops the container: a seed that cannot run is a deployment
+# failure, not something to log and continue past. Seeds skip optional work themselves.
 echo "Seeding database..."
-python -m src_back.seed || echo "Seed skipped or failed - continuing."
+python -m src_back.seed
 
 echo "Starting gunicorn..."
 exec gunicorn \

@@ -6,7 +6,7 @@ import type { FieldErrors, UseFormRegister } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { z } from 'zod'
 
-import { login, register as registerUser } from '../api/auth'
+import { register as registerUser } from '../api/auth'
 import AuthFormLayout, { AuthTextField } from '../components/AuthFormLayout'
 import { useAuthFormState } from '../hooks/useAuthFormState'
 
@@ -78,19 +78,16 @@ export default function Register() {
     } = useForm<FormData>({ resolver: zodResolver(schema) })
 
     /**
-     * Register the account, then sign in with the same credentials.
-     *
-     * The explicit login is what establishes the session cookie this client
-     * relies on, rather than depending on the register response to do it.
+     * Create the account; the server signs the new user in on the same request.
      *
      * @param data - The validated form values.
      * @returns A promise that settles when registration completes.
      */
     const onSubmit = (data: FormData) =>
-        handleAuthAction(async () => {
-            await registerUser(data.email, data.password)
-            await login(data.email, data.password)
-        }, 'Registration failed.')
+        handleAuthAction(
+            () => registerUser(data.email, data.password),
+            'Registration failed.',
+        )
 
     return (
         <AuthFormLayout

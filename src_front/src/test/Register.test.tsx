@@ -4,7 +4,7 @@ import type { AxiosResponse } from 'axios'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { login, me, register } from '../api/auth'
+import { register } from '../api/auth'
 import Register from '../pages/Register'
 import { useAuthStore } from '../store/auth'
 import type { AuthUser } from '../types/auth'
@@ -92,13 +92,11 @@ describe('Register', () => {
         expect(register).not.toHaveBeenCalled()
     })
 
-    it('registers, signs in, loads the user, and navigates to /', async () => {
+    it('registers, stores the signed-in user, and navigates to /', async () => {
         const user = userEvent.setup()
         vi.mocked(register).mockResolvedValue({
             data: testUser,
         } as AxiosResponse<AuthUser>)
-        vi.mocked(login).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
-        vi.mocked(me).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
         renderRegister()
 
         await fillRegistrationForm(user, {
@@ -110,8 +108,6 @@ describe('Register', () => {
 
         expect(await screen.findByText('Home page')).toBeInTheDocument()
         expect(register).toHaveBeenCalledWith('new@example.com', 'password123')
-        expect(login).toHaveBeenCalledWith('new@example.com', 'password123')
-        expect(me).toHaveBeenCalledTimes(1)
         expect(useAuthStore.getState().user).toEqual(testUser)
     })
 
@@ -132,7 +128,6 @@ describe('Register', () => {
         expect(await screen.findByRole('alert')).toHaveTextContent(
             'Email is already registered.',
         )
-        expect(login).not.toHaveBeenCalled()
         expect(useAuthStore.getState().user).toBeNull()
     })
 

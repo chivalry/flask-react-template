@@ -82,6 +82,46 @@ describe('useAuthStore', () => {
                 isLoading: false,
             })
         })
+
+        it('ignores a stale response that lands after the visitor signed in', async () => {
+            useAuthStore.setState({ isLoading: true })
+            let rejectMe: (reason: Error) => void = () => undefined
+            vi.mocked(me).mockReturnValue(
+                new Promise<AxiosResponse<AuthUser>>((_resolve, reject) => {
+                    rejectMe = reject
+                }),
+            )
+            const pending = useAuthStore.getState().fetchMe()
+
+            useAuthStore.getState().setUser(testUser)
+            rejectMe(new Error('Unauthorized'))
+            await pending
+
+            expect(useAuthStore.getState()).toMatchObject({
+                user: testUser,
+                isLoading: false,
+            })
+        })
+
+        it('lets only the latest of two overlapping calls update the store', async () => {
+            const otherUser = { ...testUser, id: 2, email: 'other@example.com' }
+            let resolveFirst: (response: AxiosResponse<AuthUser>) => void = () =>
+                undefined
+            vi.mocked(me)
+                .mockReturnValueOnce(
+                    new Promise<AxiosResponse<AuthUser>>((resolve) => {
+                        resolveFirst = resolve
+                    }),
+                )
+                .mockResolvedValueOnce({ data: otherUser } as AxiosResponse<AuthUser>)
+            const first = useAuthStore.getState().fetchMe()
+            await useAuthStore.getState().fetchMe()
+
+            resolveFirst({ data: testUser } as AxiosResponse<AuthUser>)
+            await first
+
+            expect(useAuthStore.getState().user).toEqual(otherUser)
+        })
     })
 
     describe('logout', () => {
@@ -97,13 +137,11 @@ describe('useAuthStore', () => {
             expect(useAuthStore.getState().user).toBeNull()
         })
 
-        it('clears the user even when the request fails, then rethrows', async () => {
+        it('clears the user and resolves even when the request fails', async () => {
             useAuthStore.setState({ user: testUser })
             vi.mocked(logout).mockRejectedValue(new Error('logout request failed'))
 
-            await expect(useAuthStore.getState().logout()).rejects.toThrow(
-                'logout request failed',
-            )
+            await expect(useAuthStore.getState().logout()).resolves.toBeUndefined()
 
             expect(useAuthStore.getState().user).toBeNull()
         })

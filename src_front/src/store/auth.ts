@@ -17,35 +17,57 @@ interface AuthState {
 }
 
 /**
+ * Stamp for `fetchMe` calls, bumped by every explicit change to the user, so a
+ * `/me` response that was still in flight when the visitor signed in or out is
+ * recognized as stale and discarded instead of overwriting the newer state.
+ */
+let generation = 0
+
+/**
  * Access the signed-in user and the actions that change them.
  *
  * Nothing is persisted on the client: the server cookie is the session, and
  * `fetchMe` reconciles the store with it on page load. `isLoading` stays true
- * until that first reconciliation settles, so route guards can wait instead of
- * redirecting a signed-in visitor to the login page.
+ * until that reconciliation settles or a sign-in sets the user, so route guards
+ * can wait instead of redirecting a signed-in visitor to the login page.
  */
-export const useAuthStore = create<AuthState>()((set) => ({
-    user: null,
-    isLoading: true,
-    setUser: (user) => set({ user }),
-    clearUser: () => set({ user: null }),
-    fetchMe: async () => {
-        try {
-            const { data } = await me()
-            set({ user: data, isLoading: false })
-        } catch {
-            set({ user: null, isLoading: false })
-        }
-    },
-    logout: async () => {
-        try {
-            await requestLogout()
-        } finally {
-            set({ user: null })
-        }
-    },
-}))
+export const useAuthStore = create<AuthState>()((set) => {
+    /**
+     * Record a settled user state and invalidate any `/me` request in flight.
+     *
+     * @param user - The signed-in user, or null when there is no session.
+     */
+    const settle = (user: AuthUser | null) => {
+        generation += 1
+        set({ user, isLoading: false })
+    }
+
+    return {
+        user: null,
+        isLoading: true,
+        setUser: settle,
+        clearUser: () => settle(null),
+        fetchMe: async () => {
+            const stamp = ++generation
+            const user = await me().then(
+                (response) => response.data,
+                () => null,
+            )
+            if (stamp === generation) set({ user, isLoading: false })
+        },
+        logout: async () => {
+            try {
+                await requestLogout()
+            } catch {
+                // The local session ends regardless; a server session that outlived
+                // this failure is replaced the next time the visitor signs in.
+            } finally {
+                settle(null)
+            }
+        },
+    }
+})
 
 // A 401 outside the auth endpoints means the session is gone: drop the user so
 // the route guards send the visitor back to the login page.
-setUnauthorizedHandler(() => useAuthStore.setState({ user: null, isLoading: false }))
+setUnauthorizedHandler(() => useAuthStore.getState().clearUser())
