@@ -3,6 +3,7 @@
     "ms-python.python",
     "ms-python.vscode-pylance",
     "ms-python.debugpy",
+    "vitest.explorer",
     "charliermarsh.ruff",
     "dbaeumer.vscode-eslint",
     "esbenp.prettier-vscode",
@@ -22,5 +23,10 @@
     "christian-kohler.npm-intellisense",
     "anthropic.claude-code",
     "ziyasal.vscode-open-in-github"
+  ],
+  "unwantedRecommendations": [
+    "hbenl.vscode-test-explorer",
+    "littlefoxteam.vscode-python-test-adapter",
+    "orta.vscode-jest"
   ]
 }

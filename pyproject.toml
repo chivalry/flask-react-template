@@ -1,9 +1,13 @@
 [tool.ruff]
 line-length = 90
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "D"]
+# These PEP 695 checks are preview rules in the pinned Ruff release.
+preview = true
+explicit-preview-rules = true
+extend-select = ["UP046", "UP047"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

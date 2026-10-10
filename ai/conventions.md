@@ -34,6 +34,9 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   arguments and returns match it. Functions stay under 50 physical lines
   (`scripts/check_function_length.py`). `basedpyright` runs in standard mode.
 - Python uses single quotes (Ruff format) and a line length of 90.
+- Ruff targets Python 3.12, matching Docker, CI, and the type checker. This is a
+  project-specific exception to the shared `py311` standard; a newer local venv
+  does not raise the deployment baseline.
 
 ## API Responses
 
