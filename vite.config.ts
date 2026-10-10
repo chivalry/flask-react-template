@@ -18,12 +18,14 @@ export default defineConfig(({ mode }) => {
         },
         server: {
             port: parseInt(process.env.FRONTEND_PORT ?? '5174'),
+            // Regex keys match whole path segments, like the Flask 404 handler, so
+            // a client route such as /api-docs is not proxied to the backend.
             proxy: {
-                '/api': {
+                '^/api(/|$)': {
                     target: apiTarget,
                     changeOrigin: true,
                 },
-                '/uploads': {
+                '^/uploads(/|$)': {
                     target: apiTarget,
                     changeOrigin: true,
                 },

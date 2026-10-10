@@ -14,6 +14,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_login import login_required
 from marshmallow import ValidationError
+from werkzeug.exceptions import NotFound
 
 from src_back.extensions import db, login_manager, migrate
 
@@ -26,6 +27,8 @@ MAX_UPLOAD_MB = 25
 _PLACEHOLDER_SECRET_KEYS = frozenset(
     {'dev-secret', 'change-me', 'change-me-in-production'}
 )
+
+_JSON_PATH_PREFIXES = ('/api', '/uploads')
 
 _JSON_ERROR_MESSAGES = {
     400: 'Bad request',
@@ -211,6 +214,23 @@ def _handle_validation_error(error: ValidationError):
     return jsonify({'error': 'Invalid request'}), 422
 
 
+def _is_json_path(path: str) -> bool:
+    """Decide whether an unmatched path belongs to the API or the upload store.
+
+    Matching whole path segments keeps client routes that merely start with the
+    same letters, such as ``/api-docs`` or ``/uploads-gallery``, on the SPA shell.
+
+    Args:
+        path: The request path.
+
+    Returns:
+        ``True`` for ``/api``, ``/uploads``, and anything beneath them.
+    """
+    return any(
+        path == prefix or path.startswith(prefix + '/') for prefix in _JSON_PATH_PREFIXES
+    )
+
+
 def _register_error_handlers(app: Flask) -> None:
     """Attach the JSON error handlers and the SPA fallthrough for 404.
 
@@ -236,11 +256,11 @@ def _register_error_handlers(app: Flask) -> None:
 
         Returns:
             A JSON error envelope with status 404 for ``/api`` and ``/uploads``
-            paths, otherwise the built ``index.html``.
+            paths and their descendants, otherwise the built ``index.html``.
         """
-        if request.path.startswith(('/api', '/uploads')):
+        if _is_json_path(request.path):
             return jsonify({'error': 'Not found'}), 404
-        return app.send_static_file('index.html')
+        return _serve_spa_shell(app)
 
 
 def _register_static_routes(app: Flask) -> None:
@@ -268,6 +288,26 @@ def _register_static_routes(app: Flask) -> None:
         """Serve the built SPA shell at the site root.
 
         Returns:
-            The built ``index.html`` from the static folder.
+            The built ``index.html`` from the static folder, or a JSON 404 when
+            no frontend build is present.
         """
+        return _serve_spa_shell(app)
+
+
+def _serve_spa_shell(app: Flask):
+    """Serve the built single-page-app shell, or a JSON 404 when it is absent.
+
+    The backend container ships without ``dist/``: in Docker the SPA comes from
+    the Vite or nginx container instead. Without this guard the missing file
+    would raise inside the 404 handler and surface as a 500.
+
+    Args:
+        app: The application whose static folder holds the frontend build.
+
+    Returns:
+        The built ``index.html``, or a JSON error envelope with status 404.
+    """
+    try:
         return app.send_static_file('index.html')
+    except NotFound:
+        return jsonify({'error': 'Not found'}), 404

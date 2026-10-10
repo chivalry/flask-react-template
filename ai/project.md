@@ -64,10 +64,13 @@ All commands run from the repo root via npm scripts. Python tooling always goes 
 - Migrations use Flask-Migrate/Alembic. Author with
   `.venv/bin/flask --app src_back.app db migrate -m "<slug>"`, review the file, apply
   with `db upgrade`. Files are named `YYYY_MM_DD_<rev>_<slug>.py`.
-- `docker/entrypoint.sh` runs `db upgrade` and the seed on every container start, in
-  development and in production, and a non-zero seed exit stops the container. Seeds
-  skip optional work themselves instead of failing. `scripts/deploy.sh` takes a
-  database backup before the production upgrade.
+- `docker/entrypoint.sh` owns migrations: it runs `db upgrade` and the seed on every
+  container start, in development and in production, and a non-zero exit stops the
+  container. Seeds skip optional work themselves instead of failing. `scripts/deploy.sh`
+  never runs `db upgrade` itself; it takes a database backup, restarts the stack, and
+  waits for `/api/health`, which the backend serves only after the entrypoint finishes.
+  This assumes one backend container; scaling it out means moving migrations into the
+  deploy step.
 - Run `flask` inside the container or through the venv, never with the system Python:
   `docker compose exec -T backend flask --app src_back.app db upgrade` or
   `.venv/bin/flask --app src_back.app ...`.

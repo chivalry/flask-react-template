@@ -34,6 +34,32 @@ def test_index_route_serves_static_folder_index_html(app, tmp_path):
     assert response.get_data(as_text=True) == '<html>spa</html>'
 
 
+@pytest.mark.parametrize('path', ['/', '/some-client-route'])
+def test_missing_frontend_build_returns_json_not_found(app, tmp_path, path):
+    app.static_folder = str(tmp_path / 'no-build-here')
+    response = app.test_client().get(path)
+    assert response.status_code == 404
+    assert response.get_json() == {'error': 'Not found'}
+
+
+@pytest.mark.parametrize('path', ['/api-docs', '/uploads-gallery'])
+def test_lookalike_client_routes_serve_the_spa(app, tmp_path, path):
+    static_dir = tmp_path / 'dist'
+    static_dir.mkdir()
+    (static_dir / 'index.html').write_text('<html>spa</html>')
+    app.static_folder = str(static_dir)
+    response = app.test_client().get(path)
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == '<html>spa</html>'
+
+
+@pytest.mark.parametrize('path', ['/api', '/uploads', '/uploads/nested/missing.png'])
+def test_bare_and_nested_json_prefixes_return_json_not_found(auth_client, path):
+    response = auth_client.get(path)
+    assert response.status_code == 404
+    assert response.get_json() == {'error': 'Not found'}
+
+
 @pytest.mark.parametrize(
     ('status', 'message'),
     [(400, 'Bad request'), (401, 'Unauthorized'), (403, 'Forbidden')],

@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
+import { AxiosError } from 'axios'
 import type { AxiosResponse } from 'axios'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -26,7 +27,13 @@ const renderAppAtPath = (path: string) =>
         </MemoryRouter>,
     )
 
-const signedOut = () => vi.mocked(me).mockRejectedValue(new Error('Unauthorized'))
+// The server answers a missing session with 401; only that status signs the visitor
+// out, so the helper must reject the way axios would, not with a bare Error.
+const signedOut = () => {
+    const unauthorized = new AxiosError('Unauthorized', 'ERR_BAD_REQUEST')
+    unauthorized.response = { status: 401 } as AxiosResponse
+    vi.mocked(me).mockRejectedValue(unauthorized)
+}
 const signedIn = () =>
     vi.mocked(me).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
 

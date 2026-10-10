@@ -203,6 +203,10 @@ class ChildRecordService(Generic[T]):
     def update(self, record: T, data: dict[str, Any]) -> T:
         """Apply column values to a pre-fetched child record and persist it.
 
+        The parent foreign key is skipped even when ``data`` carries it: the URL
+        that :meth:`get_for_parent` validated stays authoritative, so a body
+        cannot move the child under another parent.
+
         Args:
             record: The record returned by :meth:`get_for_parent`.
             data: Validated column values to set.
@@ -211,6 +215,8 @@ class ChildRecordService(Generic[T]):
             The same record, updated and committed.
         """
         for key, value in data.items():
+            if key == self._parent_fk:
+                continue
             setattr(record, key, value)
         db.session.commit()
         return record

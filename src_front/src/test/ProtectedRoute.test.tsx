@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ProtectedRoute from '../components/ProtectedRoute'
 import { useAuthStore } from '../store/auth'
@@ -29,7 +30,7 @@ const renderProtectedRoute = () =>
 
 describe('ProtectedRoute', () => {
     beforeEach(() => {
-        useAuthStore.setState({ user: null, isLoading: false })
+        useAuthStore.setState({ user: null, isLoading: false, sessionCheckFailed: false })
     })
 
     it('renders nothing while the session check is still in flight', () => {
@@ -55,5 +56,37 @@ describe('ProtectedRoute', () => {
 
         expect(screen.getByText('Login page')).toBeInTheDocument()
         expect(screen.queryByText('Protected content')).not.toBeInTheDocument()
+    })
+
+    it('offers a retry instead of redirecting when the session check failed', () => {
+        useAuthStore.setState({ sessionCheckFailed: true })
+
+        renderProtectedRoute()
+
+        expect(screen.getByRole('alert')).toHaveTextContent(
+            'Could not reach the server to check your session.',
+        )
+        expect(screen.queryByText('Login page')).not.toBeInTheDocument()
+        expect(screen.queryByText('Protected content')).not.toBeInTheDocument()
+    })
+
+    it('runs the session check again when Retry is clicked', async () => {
+        const user = userEvent.setup()
+        const fetchMe = vi.fn().mockResolvedValue(undefined)
+        useAuthStore.setState({ sessionCheckFailed: true, fetchMe })
+        renderProtectedRoute()
+
+        await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+        expect(fetchMe).toHaveBeenCalledTimes(1)
+    })
+
+    it('still renders the child route for a signed-in user after a failed refresh', () => {
+        useAuthStore.setState({ user: testUser, sessionCheckFailed: true })
+
+        renderProtectedRoute()
+
+        expect(screen.getByText('Protected content')).toBeInTheDocument()
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 })

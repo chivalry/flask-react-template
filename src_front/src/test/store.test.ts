@@ -33,14 +33,15 @@ const refuseWith401: AxiosAdapter = async (config: InternalAxiosRequestConfig) =
 describe('useAuthStore', () => {
     beforeEach(() => {
         vi.clearAllMocks()
-        useAuthStore.setState({ user: null, isLoading: false })
+        useAuthStore.setState({ user: null, isLoading: false, sessionCheckFailed: false })
     })
 
-    it('starts with no user and the loading flag raised', () => {
-        const { user, isLoading } = useAuthStore.getInitialState()
+    it('starts with no user, the loading flag raised, and no failed check', () => {
+        const { user, isLoading, sessionCheckFailed } = useAuthStore.getInitialState()
 
         expect(user).toBeNull()
         expect(isLoading).toBe(true)
+        expect(sessionCheckFailed).toBe(false)
     })
 
     it('setUser stores the user', () => {
@@ -71,15 +72,58 @@ describe('useAuthStore', () => {
             })
         })
 
-        it('clears the user and lowers the loading flag on failure', async () => {
+        it('clears the user when the server answers 401', async () => {
             useAuthStore.setState({ user: testUser, isLoading: true })
-            vi.mocked(me).mockRejectedValue(new Error('Unauthorized'))
+            const unauthorized = new AxiosError('Unauthorized', 'ERR_BAD_REQUEST')
+            unauthorized.response = { status: 401 } as AxiosResponse
+            vi.mocked(me).mockRejectedValue(unauthorized)
 
             await useAuthStore.getState().fetchMe()
 
             expect(useAuthStore.getState()).toMatchObject({
                 user: null,
                 isLoading: false,
+                sessionCheckFailed: false,
+            })
+        })
+
+        it('keeps the user and flags the check when the request fails without a 401', async () => {
+            useAuthStore.setState({ user: testUser, isLoading: true })
+            vi.mocked(me).mockRejectedValue(
+                new AxiosError('Network Error', 'ERR_NETWORK'),
+            )
+
+            await useAuthStore.getState().fetchMe()
+
+            expect(useAuthStore.getState()).toMatchObject({
+                user: testUser,
+                isLoading: false,
+                sessionCheckFailed: true,
+            })
+        })
+
+        it('treats a non-axios failure the same as a network failure', async () => {
+            useAuthStore.setState({ user: null, isLoading: true })
+            vi.mocked(me).mockRejectedValue(new Error('boom'))
+
+            await useAuthStore.getState().fetchMe()
+
+            expect(useAuthStore.getState()).toMatchObject({
+                user: null,
+                isLoading: false,
+                sessionCheckFailed: true,
+            })
+        })
+
+        it('clears the failed-check flag when a retry succeeds', async () => {
+            useAuthStore.setState({ sessionCheckFailed: true })
+            vi.mocked(me).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
+
+            await useAuthStore.getState().fetchMe()
+
+            expect(useAuthStore.getState()).toMatchObject({
+                user: testUser,
+                sessionCheckFailed: false,
             })
         })
 

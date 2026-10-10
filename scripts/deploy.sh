@@ -6,9 +6,10 @@
 # issued the certificate the nginx site references.
 #
 # Steps: pre-flight checks (Compose project + data volumes, certificate present),
-# git pull, pre-migration database backup, rebuild and restart the stack, run
-# migrations, install the nginx site, the certbot deploy hook, and the certificate
-# monitoring units.
+# git pull, pre-migration database backup (starting the database first if the stack is
+# stopped), rebuild and restart the stack, wait for the backend to report healthy (its
+# entrypoint runs the migrations and the seed before gunicorn starts), install the
+# nginx site, the certbot deploy hook, and the certificate monitoring units.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +46,29 @@ compose() {
     --env-file .env "$@"
 }
 
+# wait_for <label> <service> <probe...>: run the probe every 2 s for up to 2 minutes.
+# The deadline keeps a crashed or misconfigured service from hanging the deploy and
+# the SSH session that invoked it; on timeout the service's recent log is printed.
+wait_for() {
+  local label="$1" service="$2"
+  shift 2
+  local attempt
+  for attempt in $(seq 1 60); do
+    if "$@" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "   waiting for $label ($attempt/60)..."
+    sleep 2
+  done
+  echo "ERROR: $label did not become ready within 2 minutes. Recent log:"
+  compose logs --tail 50 "$service" || true
+  exit 1
+}
+wait_for_db() { wait_for "database" db compose exec -T db pg_isready; }
+wait_for_backend() {
+  wait_for "backend" backend curl -fsS "http://127.0.0.1:$BACKEND_PORT/api/health"
+}
+
 # Pre-flight: assert the resolved Compose project + its data volumes, so a
 # misconfigured .env can never deploy into (and orphan) the wrong volume set.
 PROJECT="$(get COMPOSE_PROJECT_NAME)"
@@ -65,8 +89,10 @@ if docker volume inspect "$PG_VOLUME" >/dev/null 2>&1 \
     fi
   done
   echo "==> Pre-flight OK: project '$PROJECT' (postgres_data + uploads_data present)."
+  FIRST_DEPLOY=0
 else
   echo "==> Pre-flight: no data volumes for '$PROJECT' yet — treating as first deploy."
+  FIRST_DEPLOY=1
 fi
 
 # The nginx site below references the certificate; check now rather than after the
@@ -82,15 +108,20 @@ echo "==> Pulling latest code..."
 git pull
 
 # Pre-migration DB backup: dump the CURRENT (old) database before down/upgrade so a
-# bad migration is instantly reversible. Skipped on the first deploy.
-if [ -n "$(compose ps -q db 2>/dev/null)" ]; then
+# bad migration is instantly reversible. Keyed on the data volume rather than on a
+# running container, so a stopped stack still gets its dump; only a first deploy, with
+# no data volume yet, has nothing to back up.
+if [ "$FIRST_DEPLOY" = 0 ]; then
+  echo "==> Ensuring the database is running for the pre-migration backup..."
+  compose up -d db
+  wait_for_db
   echo "==> Pre-migration DB backup..."
   if ! bash scripts/backup.sh --pre-migration; then
     echo "ERROR: pre-migration backup failed — see $LOG_DIR/backup.log"
     exit 1
   fi
 else
-  echo "==> No running db container — skipping pre-migration backup (first deploy)."
+  echo "==> First deploy: no database to back up yet."
 fi
 
 echo "==> Stopping existing containers..."
@@ -99,16 +130,11 @@ compose down
 echo "==> Building and starting containers..."
 compose up -d --build
 
-echo "==> Waiting for database to be ready..."
-until compose exec -T db pg_isready 2>/dev/null; do
-  echo "   waiting for database..."
-  sleep 2
-done
-
-# docker/entrypoint.sh already upgrades on container start; running it again here is a
-# no-op that fails loudly if the backend did not come up.
-echo "==> Running migrations..."
-compose exec -T backend flask --app src_back.app db upgrade
+# docker/entrypoint.sh owns the migrations and the seed and starts gunicorn only after
+# both succeed, so a healthy backend means the schema is current. Running `db upgrade`
+# here as well would race the entrypoint's run on the same migration.
+echo "==> Waiting for the backend to report healthy..."
+wait_for_backend
 
 echo "==> Installing nginx site config ($NGINX_SITE)..."
 rm -f /etc/nginx/sites-enabled/default

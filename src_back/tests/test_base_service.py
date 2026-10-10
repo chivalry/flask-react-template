@@ -154,6 +154,15 @@ def test_child_update_sets_fields_on_the_given_record(db):
     assert db.session.get(WidgetNote, note.id).body == 'changed'
 
 
+def test_child_update_ignores_parent_id_in_body(db):
+    owner, other = _make_widget(db, 'owner'), _make_widget(db, 'other')
+    note = _make_note(db, owner, 'before')
+    service = ChildRecordService(WidgetNote, 'widget_id', WidgetNote.id)
+    service.update(note, {'widget_id': other.id, 'body': 'after'})
+    assert note.widget_id == owner.id
+    assert note.body == 'after'
+
+
 def test_child_delete_calls_hook_and_removes_record(db):
     note = _make_note(db, _make_widget(db), 'doomed')
     service = RecordingChildService()

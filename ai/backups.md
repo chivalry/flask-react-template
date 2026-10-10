@@ -66,8 +66,10 @@ Secrets live only in `.env` (gitignored) and `/root/.config/rclone/rclone.conf` 
 
 ## Pre-migration dumps
 
-`scripts/deploy.sh` runs `scripts/backup.sh --pre-migration` whenever a `db` container
-is running, before taking the stack down. The dump is kept locally in
+`scripts/deploy.sh` runs `scripts/backup.sh --pre-migration` whenever the
+`<COMPOSE_PROJECT_NAME>_postgres_data` volume exists, starting the `db` container first
+if the stack is stopped, before taking the stack down. Only a first deploy, with no data
+volume yet, skips it. The dump is kept locally in
 `/var/backups/$APP_NAME/pre-migration/` (newest three) and, once the rclone remote
 exists, pushed to `premigration/` in the bucket. A failed pre-migration backup aborts
 the deploy. To undo a bad migration, restore the newest local dump with the database
