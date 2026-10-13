@@ -10,7 +10,14 @@ export default defineConfig(({ mode }) => {
         // Keep Vite's cache beside the root node_modules instead of creating
         // a stray src_front/node_modules directory.
         cacheDir: '../node_modules/.vite',
-        plugins: [react()],
+        plugins: [
+            react({
+                babel: {
+                    // Optimize production; keep test coverage on authored source.
+                    plugins: mode === 'production' ? ['babel-plugin-react-compiler'] : [],
+                },
+            }),
+        ],
         resolve: {
             alias: {
                 '@': '/src_front/src',
