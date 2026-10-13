@@ -1,17 +1,17 @@
 """Session authentication routes: register, login, logout, and identity."""
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, Response, jsonify
 from flask_login import current_user, login_required, login_user, logout_user
 
 from src_back.schemas.user import login_schema, user_schema
 from src_back.services.auth import authenticate_user, register_user
-from src_back.utils import conflict, parse_request_json, unauthorized
+from src_back.utils import ErrorResponse, conflict, parse_request_json, unauthorized
 
 bp = Blueprint('auth', __name__)
 
 
 @bp.post('/register')
-def register():
+def register() -> tuple[Response, int]:
     """Create an account and sign the new user in immediately.
 
     A payload that fails validation never reaches this body: ``parse_request_json``
@@ -31,7 +31,7 @@ def register():
 
 
 @bp.post('/login')
-def login():
+def login() -> Response | ErrorResponse:
     """Verify credentials and start a session.
 
     Returns:
@@ -49,7 +49,7 @@ def login():
 
 @bp.post('/logout')
 @login_required
-def logout():
+def logout() -> Response:
     """End the current session.
 
     Returns:
@@ -61,7 +61,7 @@ def logout():
 
 @bp.get('/me')
 @login_required
-def me():
+def me() -> Response:
     """Return the signed-in user, for rehydrating the client on page load.
 
     Returns:

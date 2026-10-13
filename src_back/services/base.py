@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import ColumnExpressionArgument
+
 from src_back.extensions import Base, db
 
 
@@ -18,7 +20,7 @@ class CRUDService[T: Base]:
     removing files, that must run before the row is deleted.
     """
 
-    def __init__(self, model: type[T], *order_by: Any) -> None:
+    def __init__(self, model: type[T], *order_by: ColumnExpressionArgument[Any]) -> None:
         """Bind the service to a model and a default ordering.
 
         Args:
@@ -125,7 +127,9 @@ class ChildRecordService[T: Base]:
     be reached through the parent that owns it.
     """
 
-    def __init__(self, model: type[T], parent_fk: str, *order_by: Any) -> None:
+    def __init__(
+        self, model: type[T], parent_fk: str, *order_by: ColumnExpressionArgument[Any]
+    ) -> None:
         """Bind the service to a child model and its parent foreign key.
 
         Args:

@@ -7,16 +7,19 @@ hard refresh.
 
 import logging
 import os
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_login import login_required
 from marshmallow import ValidationError
 from werkzeug.exceptions import NotFound
 
 from src_back.extensions import db, login_manager, migrate
+from src_back.models import User
 
 load_dotenv()
 
@@ -40,7 +43,7 @@ _JSON_ERROR_MESSAGES = {
 
 
 @login_manager.user_loader
-def load_user(user_id: str):
+def load_user(user_id: str) -> User | None:
     """Reload the signed-in user from the id stored in the session cookie.
 
     Args:
@@ -49,13 +52,11 @@ def load_user(user_id: str):
     Returns:
         The matching user, or ``None`` if the account no longer exists.
     """
-    from src_back.models import User
-
     return db.session.get(User, int(user_id))
 
 
 @login_manager.unauthorized_handler
-def unauthorized_handler():
+def unauthorized_handler() -> tuple[Response, int]:
     """Answer unauthenticated requests with JSON instead of a redirect.
 
     Returns:
@@ -112,8 +113,8 @@ def _configure_application(app: Flask) -> None:
     app.config['SESSION_COOKIE_SECURE'] = (
         os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
     )
-    app.config['UPLOAD_FOLDER'] = os.path.abspath(
-        os.environ.get('UPLOAD_FOLDER', 'src_back/uploads')
+    app.config['UPLOAD_FOLDER'] = str(
+        Path(os.environ.get('UPLOAD_FOLDER', 'src_back/uploads')).resolve()
     )
     app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_MB * 1024 * 1024
 
@@ -168,7 +169,9 @@ def _register_blueprints(app: Flask) -> None:
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
 
 
-def _build_json_error_handler(status_code: int, message: str):
+def _build_json_error_handler(
+    status_code: int, message: str
+) -> Callable[[Exception], tuple[Response, int]]:
     """Create a handler that answers one status code with a JSON envelope.
 
     This is a factory rather than a closure defined inside the registration
@@ -183,7 +186,7 @@ def _build_json_error_handler(status_code: int, message: str):
         A Flask error handler bound to ``status_code``.
     """
 
-    def handle_error(_e: Exception):
+    def handle_error(_e: Exception) -> tuple[Response, int]:
         """Return the JSON error envelope for this status code.
 
         Args:
@@ -197,7 +200,7 @@ def _build_json_error_handler(status_code: int, message: str):
     return handle_error
 
 
-def _handle_validation_error(error: ValidationError):
+def _handle_validation_error(error: ValidationError) -> tuple[Response, int]:
     """Answer a failed request-body validation with a 422 envelope.
 
     Raised by :func:`src_back.utils.parse_request_json`. Field-level details are
@@ -244,7 +247,7 @@ def _register_error_handlers(app: Flask) -> None:
     app.register_error_handler(ValidationError, _handle_validation_error)
 
     @app.errorhandler(404)
-    def not_found_handler(_e: Exception):
+    def not_found_handler(_e: Exception) -> Response | tuple[Response, int]:
         """Serve JSON for unknown API paths and the SPA shell otherwise.
 
         This is what makes client-side routes survive a hard refresh: an
@@ -272,7 +275,7 @@ def _register_static_routes(app: Flask) -> None:
 
     @app.get('/uploads/<path:filename>')
     @login_required
-    def serve_uploaded_file(filename: str):
+    def serve_uploaded_file(filename: str) -> Response:
         """Serve an uploaded file to signed-in users only.
 
         Args:
@@ -284,7 +287,7 @@ def _register_static_routes(app: Flask) -> None:
         return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
     @app.get('/')
-    def index():
+    def index() -> Response | tuple[Response, int]:
         """Serve the built SPA shell at the site root.
 
         Returns:
@@ -294,7 +297,7 @@ def _register_static_routes(app: Flask) -> None:
         return _serve_spa_shell(app)
 
 
-def _serve_spa_shell(app: Flask):
+def _serve_spa_shell(app: Flask) -> Response | tuple[Response, int]:
     """Serve the built single-page-app shell, or a JSON 404 when it is absent.
 
     The backend container ships without ``dist/``: in Docker the SPA comes from

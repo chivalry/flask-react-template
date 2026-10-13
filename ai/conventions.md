@@ -33,7 +33,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - Every function and class has a Google-style docstring, and `pydoclint` checks that
   arguments and returns match it. Functions stay under 50 physical lines
   (`scripts/check_function_length.py`). `basedpyright` runs in standard mode.
-- Python uses single quotes (Ruff format) and a line length of 90.
+- Python uses single quotes (Ruff format) and a line length of 90. Ruff also enforces
+  `ANN` (every parameter and return is annotated; `*args: Any` and `**kwargs: Any`
+  are allowed on pass-through wrappers), `FBT` (boolean parameters are keyword-only),
+  `PTH` (pathlib instead of `os.path`), and `SIM`.
 - Ruff targets Python 3.12, matching Docker, CI, and the type checker. This is a
   project-specific exception to the shared `py311` standard; a newer local venv
   does not raise the deployment baseline.

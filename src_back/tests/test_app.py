@@ -1,20 +1,25 @@
-import os
+from pathlib import Path
+from typing import NoReturn
 
 import pytest
-from flask import Blueprint, abort, g
+from flask import Blueprint, Flask, abort, g
+from flask.testing import FlaskClient
 from marshmallow import ValidationError
 
 from src_back.app import MAX_UPLOAD_MB, create_app, load_user, unauthorized_handler
+from src_back.models import User
 from src_back.tests.conftest import PNG_BYTES
 
 
-def test_unrouted_api_path_returns_json_not_found_error(client):
+def test_unrouted_api_path_returns_json_not_found_error(client: FlaskClient) -> None:
     response = client.get('/api/does-not-exist')
     assert response.status_code == 404
     assert response.get_json() == {'error': 'Not found'}
 
 
-def test_unknown_client_route_serves_spa_index_fallback(app, tmp_path):
+def test_unknown_client_route_serves_spa_index_fallback(
+    app: Flask, tmp_path: Path
+) -> None:
     static_dir = tmp_path / 'dist'
     static_dir.mkdir()
     (static_dir / 'index.html').write_text('<html>spa</html>')
@@ -24,7 +29,7 @@ def test_unknown_client_route_serves_spa_index_fallback(app, tmp_path):
     assert response.get_data(as_text=True) == '<html>spa</html>'
 
 
-def test_index_route_serves_static_folder_index_html(app, tmp_path):
+def test_index_route_serves_static_folder_index_html(app: Flask, tmp_path: Path) -> None:
     static_dir = tmp_path / 'dist'
     static_dir.mkdir()
     (static_dir / 'index.html').write_text('<html>spa</html>')
@@ -35,7 +40,9 @@ def test_index_route_serves_static_folder_index_html(app, tmp_path):
 
 
 @pytest.mark.parametrize('path', ['/', '/some-client-route'])
-def test_missing_frontend_build_returns_json_not_found(app, tmp_path, path):
+def test_missing_frontend_build_returns_json_not_found(
+    app: Flask, tmp_path: Path, path: str
+) -> None:
     app.static_folder = str(tmp_path / 'no-build-here')
     response = app.test_client().get(path)
     assert response.status_code == 404
@@ -43,7 +50,9 @@ def test_missing_frontend_build_returns_json_not_found(app, tmp_path, path):
 
 
 @pytest.mark.parametrize('path', ['/api-docs', '/uploads-gallery'])
-def test_lookalike_client_routes_serve_the_spa(app, tmp_path, path):
+def test_lookalike_client_routes_serve_the_spa(
+    app: Flask, tmp_path: Path, path: str
+) -> None:
     static_dir = tmp_path / 'dist'
     static_dir.mkdir()
     (static_dir / 'index.html').write_text('<html>spa</html>')
@@ -54,7 +63,9 @@ def test_lookalike_client_routes_serve_the_spa(app, tmp_path, path):
 
 
 @pytest.mark.parametrize('path', ['/api', '/uploads', '/uploads/nested/missing.png'])
-def test_bare_and_nested_json_prefixes_return_json_not_found(auth_client, path):
+def test_bare_and_nested_json_prefixes_return_json_not_found(
+    auth_client: FlaskClient, path: str
+) -> None:
     response = auth_client.get(path)
     assert response.status_code == 404
     assert response.get_json() == {'error': 'Not found'}
@@ -64,11 +75,11 @@ def test_bare_and_nested_json_prefixes_return_json_not_found(auth_client, path):
     ('status', 'message'),
     [(400, 'Bad request'), (401, 'Unauthorized'), (403, 'Forbidden')],
 )
-def test_abort_returns_json_error_envelope(app, status, message):
+def test_abort_returns_json_error_envelope(app: Flask, status: int, message: str) -> None:
     bp = Blueprint(f'abort_{status}', __name__)
 
     @bp.get(f'/trigger-{status}')
-    def trigger():
+    def trigger() -> NoReturn:
         abort(status)
 
     app.register_blueprint(bp)
@@ -77,11 +88,11 @@ def test_abort_returns_json_error_envelope(app, status, message):
     assert response.get_json() == {'error': message}
 
 
-def test_unhandled_exception_returns_json_internal_server_error(app):
+def test_unhandled_exception_returns_json_internal_server_error(app: Flask) -> None:
     bp = Blueprint('server_error_trigger', __name__)
 
     @bp.get('/trigger-server-error')
-    def trigger_server_error():
+    def trigger_server_error() -> NoReturn:
         raise RuntimeError('deliberate failure for the 500 handler')
 
     app.register_blueprint(bp)
@@ -91,11 +102,11 @@ def test_unhandled_exception_returns_json_internal_server_error(app):
     assert response.get_json() == {'error': 'Internal server error'}
 
 
-def test_validation_error_in_a_view_returns_json_unprocessable_entity(app):
+def test_validation_error_in_a_view_returns_json_unprocessable_entity(app: Flask) -> None:
     bp = Blueprint('validation_trigger', __name__)
 
     @bp.get('/trigger-validation-error')
-    def trigger_validation_error():
+    def trigger_validation_error() -> NoReturn:
         raise ValidationError({'name': ['Missing data for required field.']})
 
     app.register_blueprint(bp)
@@ -104,7 +115,9 @@ def test_validation_error_in_a_view_returns_json_unprocessable_entity(app):
     assert response.get_json() == {'error': 'Invalid request'}
 
 
-def test_oversized_request_body_returns_json_file_too_large(app, client):
+def test_oversized_request_body_returns_json_file_too_large(
+    app: Flask, client: FlaskClient
+) -> None:
     app.config['MAX_CONTENT_LENGTH'] = 100
     response = client.post(
         '/api/v1/auth/login',
@@ -117,7 +130,7 @@ def test_oversized_request_body_returns_json_file_too_large(app, client):
     }
 
 
-def test_user_loader_reloads_user_from_session(app, user):
+def test_user_loader_reloads_user_from_session(app: Flask, user: User) -> None:
     client = app.test_client()
     client.post(
         '/api/v1/auth/login',
@@ -132,59 +145,64 @@ def test_user_loader_reloads_user_from_session(app, user):
     assert response.get_json()['email'] == user.email
 
 
-def test_load_user_returns_matching_user(app, user):
+def test_load_user_returns_matching_user(app: Flask, user: User) -> None:
     loaded = load_user(str(user.id))
     assert loaded is not None
     assert loaded.id == user.id
 
 
-def test_load_user_returns_none_for_missing_id(app):
+def test_load_user_returns_none_for_missing_id(app: Flask) -> None:
     assert load_user('99999') is None
 
 
-def test_unauthorized_handler_returns_json_401(app):
+def test_unauthorized_handler_returns_json_401(app: Flask) -> None:
     with app.test_request_context('/'):
         response, status = unauthorized_handler()
     assert status == 401
     assert response.get_json() == {'error': 'Unauthorized'}
 
 
-def test_uploads_unauthenticated_returns_unauthorized_json(client):
+def test_uploads_unauthenticated_returns_unauthorized_json(client: FlaskClient) -> None:
     response = client.get('/uploads/x.png')
     assert response.status_code == 401
     assert response.get_json() == {'error': 'Unauthorized'}
 
 
-def test_uploads_authenticated_serves_stored_file_bytes(app, auth_client):
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    with open(os.path.join(app.config['UPLOAD_FOLDER'], 'sample.png'), 'wb') as f:
-        f.write(PNG_BYTES)
+def test_uploads_authenticated_serves_stored_file_bytes(
+    app: Flask, auth_client: FlaskClient
+) -> None:
+    upload_folder = Path(app.config['UPLOAD_FOLDER'])
+    upload_folder.mkdir(parents=True, exist_ok=True)
+    (upload_folder / 'sample.png').write_bytes(PNG_BYTES)
     response = auth_client.get('/uploads/sample.png')
     assert response.status_code == 200
     assert response.data == PNG_BYTES
 
 
-def test_uploads_missing_file_returns_json_not_found(auth_client):
+def test_uploads_missing_file_returns_json_not_found(auth_client: FlaskClient) -> None:
     response = auth_client.get('/uploads/missing.png')
     assert response.status_code == 404
     assert response.get_json() == {'error': 'Not found'}
 
 
-def test_upload_folder_is_resolved_to_an_absolute_path(monkeypatch):
+def test_upload_folder_is_resolved_to_an_absolute_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv('UPLOAD_FOLDER', 'relative/uploads')
     app = create_app({'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
-    assert os.path.isabs(app.config['UPLOAD_FOLDER'])
-    assert app.config['UPLOAD_FOLDER'].endswith(os.path.join('relative', 'uploads'))
+    upload_folder = Path(app.config['UPLOAD_FOLDER'])
+    assert upload_folder.is_absolute()
+    assert upload_folder.parts[-2:] == ('relative', 'uploads')
 
 
-def test_cors_allows_each_listed_origin(monkeypatch):
+def test_cors_allows_each_listed_origin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('CORS_ALLOWED_ORIGINS', 'http://a.test,http://b.test')
     app = create_app({'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
     response = app.test_client().get('/api/health', headers={'Origin': 'http://b.test'})
     assert response.headers['Access-Control-Allow-Origin'] == 'http://b.test'
 
 
-def test_cors_rejects_an_unlisted_origin(monkeypatch):
+def test_cors_rejects_an_unlisted_origin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('CORS_ALLOWED_ORIGINS', 'http://a.test,http://b.test')
     app = create_app({'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
     response = app.test_client().get(
@@ -193,7 +211,9 @@ def test_cors_rejects_an_unlisted_origin(monkeypatch):
     assert 'Access-Control-Allow-Origin' not in response.headers
 
 
-def test_create_app_rejects_placeholder_secret_outside_development(monkeypatch):
+def test_create_app_rejects_placeholder_secret_outside_development(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv('FLASK_ENV', 'production')
     monkeypatch.setenv('SECRET_KEY', 'change-me')
     monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
@@ -201,14 +221,18 @@ def test_create_app_rejects_placeholder_secret_outside_development(monkeypatch):
         create_app()
 
 
-def test_create_app_allows_placeholder_secret_in_development(monkeypatch):
+def test_create_app_allows_placeholder_secret_in_development(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv('FLASK_ENV', 'development')
     monkeypatch.setenv('SECRET_KEY', 'change-me')
     monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
     assert create_app().config['SECRET_KEY'] == 'change-me'
 
 
-def test_create_app_allows_real_secret_outside_development(monkeypatch):
+def test_create_app_allows_real_secret_outside_development(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv('FLASK_ENV', 'production')
     monkeypatch.setenv('SECRET_KEY', 'a-long-random-secret')
     monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
