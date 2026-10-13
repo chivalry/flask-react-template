@@ -1,6 +1,11 @@
 import os
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
+from flask import Flask
+from flask.testing import FlaskClient
+from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,7 +42,7 @@ class WidgetNote(BaseMixin, Base):
 
 
 @pytest.fixture()
-def app(tmp_path):
+def app(tmp_path: Path) -> Iterator[Flask]:
     app = create_app(
         {
             'TESTING': True,
@@ -56,17 +61,17 @@ def app(tmp_path):
 
 
 @pytest.fixture()
-def client(app):
+def client(app: Flask) -> FlaskClient:
     return app.test_client()
 
 
 @pytest.fixture()
-def db(app):
+def db(app: Flask) -> SQLAlchemy:
     return _db
 
 
 @pytest.fixture()
-def user(app):
+def user(app: Flask) -> User:
     u = User(email='user@test.com', role=Role.user)
     u.set_password('password123')
     _db.session.add(u)
@@ -75,7 +80,7 @@ def user(app):
 
 
 @pytest.fixture()
-def admin_user(app):
+def admin_user(app: Flask) -> User:
     u = User(email='admin@test.com', role=Role.admin)
     u.set_password('adminpass123')
     _db.session.add(u)
@@ -84,7 +89,7 @@ def admin_user(app):
 
 
 @pytest.fixture()
-def auth_client(client, user):
+def auth_client(client: FlaskClient, user: User) -> FlaskClient:
     client.post(
         '/api/v1/auth/login',
         json={'email': user.email, 'password': 'password123'},
@@ -93,7 +98,7 @@ def auth_client(client, user):
 
 
 @pytest.fixture()
-def admin_client(client, admin_user):
+def admin_client(client: FlaskClient, admin_user: User) -> FlaskClient:
     client.post(
         '/api/v1/auth/login',
         json={'email': admin_user.email, 'password': 'adminpass123'},

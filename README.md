@@ -1,6 +1,6 @@
 # Flask React Template
 
-A full-stack starting point: **Flask** (Python) backend and **React 18** (TypeScript +
+A full-stack starting point: **Flask** (Python) backend and **React 19** (TypeScript +
 Vite) frontend, with session authentication, image-upload scaffolding, 100% test
 coverage on both sides, strict linting and typing, Docker for development and
 production, and scripts to provision and deploy a single server.
@@ -11,7 +11,7 @@ production, and scripts to provision and deploy a single server.
 | -------- | ------------------------------------------------------------ |
 | Backend  | Flask, SQLAlchemy 2, Flask-Migrate, Flask-Login, marshmallow |
 | Database | PostgreSQL 16                                                |
-| Frontend | React 18, TypeScript, Vite, MUI, Axios, Zustand, Zod         |
+| Frontend | React 19, TypeScript 6, Vite, MUI, Axios, Zustand, Zod       |
 | Tooling  | Ruff, basedpyright, pydoclint, pytest, ESLint, Prettier,     |
 |          | Vitest, fallow, Husky, markdownlint                          |
 
@@ -122,6 +122,26 @@ project/
 ├── plans/             # Implementation plans
 └── .github/workflows/ # CI, issue auto-assign
 ```
+
+## Editor testing and debugging
+
+Install the recommended `vitest.explorer` extension for frontend test discovery and
+debugging. Python tests use the Python extension's built-in pytest support and the
+project venv. Editor pytest runs use `--no-cov` so a single test can run independently;
+`npm test` still enforces full coverage for both suites.
+
+The Run and Debug view includes Flask and the current Vitest test file. Start Vite
+with `npm run dev` when debugging Flask alongside the frontend. Use the Testing view
+to debug selected Python tests. Existing Jest and legacy Test Explorer extensions
+can be disabled for this workspace if they create duplicate test entries.
+
+The editor uses the workspace TypeScript 6 SDK. TypeScript 7 is deferred because
+TypeScript ESLint currently requires TypeScript below 6.1. React Compiler optimizes
+production builds; development and tests run authored source for readable debugging
+and coverage.
+
+Python 3.12 is the deployment and lint baseline, matching Docker and CI. A newer local
+venv is supported, but does not permit syntax newer than the deployed runtime.
 
 ## Agent instructions
 

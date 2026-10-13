@@ -4,21 +4,23 @@ A service owns the database access for one resource so that API handlers stay
 thin: they parse the request, call the service, and serialize the result.
 """
 
-from typing import Any, Generic, TypeVar
+from __future__ import annotations
+
+from typing import Any
+
+from sqlalchemy import ColumnExpressionArgument
 
 from src_back.extensions import Base, db
 
-T = TypeVar('T', bound=Base)
 
-
-class CRUDService(Generic[T]):
+class CRUDService[T: Base]:
     """Generic service for top-level resources with full CRUD operations.
 
     Subclasses may override :meth:`before_delete` to add side effects, such as
     removing files, that must run before the row is deleted.
     """
 
-    def __init__(self, model: type[T], *order_by: Any) -> None:
+    def __init__(self, model: type[T], *order_by: ColumnExpressionArgument[Any]) -> None:
         """Bind the service to a model and a default ordering.
 
         Args:
@@ -116,7 +118,7 @@ class CRUDService(Generic[T]):
         """
 
 
-class ChildRecordService(Generic[T]):
+class ChildRecordService[T: Base]:
     """Generic service for child records owned by a parent resource.
 
     Unlike :class:`CRUDService`, :meth:`update` and :meth:`delete` accept a
@@ -125,7 +127,9 @@ class ChildRecordService(Generic[T]):
     be reached through the parent that owns it.
     """
 
-    def __init__(self, model: type[T], parent_fk: str, *order_by: Any) -> None:
+    def __init__(
+        self, model: type[T], parent_fk: str, *order_by: ColumnExpressionArgument[Any]
+    ) -> None:
         """Bind the service to a child model and its parent foreign key.
 
         Args:

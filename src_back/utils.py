@@ -6,16 +6,17 @@ HTTP status code, so route handlers can ``return`` one directly.
 
 import functools
 import math
-import os
 import uuid as uuid_lib
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import filetype
 from flask import Response, jsonify, request
 from flask_login import current_user
 from marshmallow import Schema
+from werkzeug.datastructures import FileStorage
 
 from src_back.models import Role
 
@@ -165,7 +166,7 @@ def paginate(items: list[Any], page: int, per_page: int) -> dict[str, Any]:
     }
 
 
-def parse_request_json(schema: Schema, partial: bool = False) -> dict[str, Any]:
+def parse_request_json(schema: Schema, *, partial: bool = False) -> dict[str, Any]:
     """Parse and validate the JSON request body against a Marshmallow schema.
 
     A missing, non-JSON, or non-object body is validated as an empty mapping, so
@@ -186,7 +187,7 @@ def parse_request_json(schema: Schema, partial: bool = False) -> dict[str, Any]:
     return cast(dict[str, Any], schema.load(payload, partial=partial))
 
 
-def dump_or_404(record: Any, schema: Schema) -> tuple[Response, int]:
+def dump_or_404(record: object, schema: Schema) -> tuple[Response, int]:
     """Serialize a record with status 200, or answer 404 when it is missing.
 
     Args:
@@ -242,7 +243,7 @@ def require_parent(getter: Callable[[int], Any], parent_id: int) -> ErrorRespons
     return None
 
 
-def validate_image_file(file: Any) -> ErrorResponse | None:
+def validate_image_file(file: FileStorage) -> ErrorResponse | None:
     """Validate an uploaded file's extension and sniffed MIME type.
 
     Reads the leading 512 bytes to detect the real content type, then seeks
@@ -257,7 +258,7 @@ def validate_image_file(file: Any) -> ErrorResponse | None:
         ``None`` when the file is a permitted image type, otherwise a 400 error
         envelope.
     """
-    ext = os.path.splitext(file.filename)[1].lower()
+    ext = Path(file.filename or '').suffix.lower()
     if ext not in ALLOWED_IMAGE_EXTENSIONS:
         return bad_request('Invalid file type')
     header = file.read(512)
@@ -271,7 +272,7 @@ def validate_image_file(file: Any) -> ErrorResponse | None:
     return None
 
 
-def admin_required(f: Callable[..., Any]) -> Callable[..., Any]:
+def admin_required[**P, R](f: Callable[P, R]) -> Callable[P, R | ErrorResponse]:
     """Restrict a route to authenticated users with the ``admin`` role.
 
     Apply beneath the route decorator. Anonymous callers get 401 and signed-in
@@ -286,7 +287,7 @@ def admin_required(f: Callable[..., Any]) -> Callable[..., Any]:
     """
 
     @functools.wraps(f)
-    def decorated(*args: Any, **kwargs: Any) -> Any:
+    def decorated(*args: P.args, **kwargs: P.kwargs) -> R | ErrorResponse:
         """Reject non-admin callers before running the wrapped view.
 
         Args:
