@@ -24,6 +24,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `require_parent()` in `utils.py` answers 404 when the parent is missing, and
   `create()` and `update()` keep the URL's parent id authoritative over any parent id
   in the body.
+- A service removes a stored file only after the commit that stops referencing it,
+  through `delete_upload()` in `utils.py`, which ignores a file that is already gone:
+  in `after_delete` for a deleted record, and after its own commit when an update
+  replaces the file. A failed commit then leaves the row and its file in place.
 - Schemas extend `BaseSchema` (marshmallow-sqlalchemy auto schema with
   `load_instance = False`), set `Meta.model`, and mark `BaseSchema.AUDIT` dump-only.
   Auto schemas omit foreign-key columns; a child schema that accepts the parent id

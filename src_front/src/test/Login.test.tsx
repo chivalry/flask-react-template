@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { AxiosResponse } from 'axios'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { login } from '../api/auth'
@@ -20,12 +20,19 @@ const testUser: AuthUser = {
     updated_at: '2026-08-01T00:00:00Z',
 }
 
-const renderLogin = () =>
+// Shows the full location it landed on, so a test can check the query and hash too.
+const RequestedPage = () => {
+    const { pathname, search, hash } = useLocation()
+    return <div>{`Requested page ${pathname}${search}${hash}`}</div>
+}
+
+const renderLogin = (state?: unknown) =>
     render(
-        <MemoryRouter initialEntries={['/login']}>
+        <MemoryRouter initialEntries={[{ pathname: '/login', state }]}>
             <Routes>
                 <Route path="/login" element={<Login />} />
                 <Route path="/" element={<div>Home page</div>} />
+                <Route path="/widgets/:widgetId" element={<RequestedPage />} />
             </Routes>
         </MemoryRouter>,
     )
@@ -38,6 +45,13 @@ const signInWith = async (
     await user.type(screen.getByLabelText('Email'), email)
     await user.type(screen.getByLabelText('Password'), password)
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
+}
+
+const renderLoginAndSignIn = async (state: unknown) => {
+    const user = userEvent.setup()
+    vi.mocked(login).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
+    renderLogin(state)
+    await signInWith(user, 'user@example.com', 'password123')
 }
 
 describe('Login', () => {
@@ -77,6 +91,28 @@ describe('Login', () => {
         expect(await screen.findByText('Home page')).toBeInTheDocument()
         expect(login).toHaveBeenCalledWith('user@example.com', 'password123')
         expect(useAuthStore.getState().user).toEqual(testUser)
+    })
+
+    it('returns to the page the guard recorded, with its query and hash', async () => {
+        await renderLoginAndSignIn({
+            from: { pathname: '/widgets/12', search: '?tab=notes', hash: '#latest' },
+        })
+
+        expect(
+            await screen.findByText('Requested page /widgets/12?tab=notes#latest'),
+        ).toBeInTheDocument()
+    })
+
+    it('returns to a recorded page that has no query or hash', async () => {
+        await renderLoginAndSignIn({ from: { pathname: '/widgets/12' } })
+
+        expect(await screen.findByText('Requested page /widgets/12')).toBeInTheDocument()
+    })
+
+    it('goes to / when the recorded page has no path', async () => {
+        await renderLoginAndSignIn({ from: { search: '?tab=notes' } })
+
+        expect(await screen.findByText('Home page')).toBeInTheDocument()
     })
 
     it('shows the server-provided message when the login request fails', async () => {

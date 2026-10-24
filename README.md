@@ -158,6 +158,10 @@ type; stored files are served, login-protected, from `/uploads/<filename>`; bodi
 25 MB get a JSON 413. Set `UPLOAD_FOLDER` in `.env`; under Docker the `uploads_data`
 volume persists files across rebuilds.
 
+To remove a stored file, a service overrides `after_delete` and calls `delete_upload()`,
+also in `src_back/utils.py`, so the file goes only once the row's deletion is committed.
+A file that is already gone is ignored.
+
 ## Deployment
 
 The production stack runs on one Ubuntu host behind host nginx with Let's Encrypt.

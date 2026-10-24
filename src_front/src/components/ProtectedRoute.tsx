@@ -1,7 +1,7 @@
 /** @file Route guard that redirects signed-out visitors to the login page. */
 
 import { Alert, Box, Button } from '@mui/material'
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 
 import { useAuthStore } from '../store/auth'
 
@@ -40,13 +40,15 @@ function SessionCheckFailed() {
  * signed-in visitor reloading the page is not bounced to the login page
  * before the session is confirmed. When that check failed without a 401, a
  * retry alert replaces the redirect. The redirect replaces the history entry,
- * so the back button does not loop between the guarded route and login.
+ * so the back button does not loop between the guarded route and login, and
+ * remembers the requested page in its state, so signing in returns there.
  *
  * @returns Nothing while loading, the matched child route for a signed-in
  *   user, the retry alert after a failed session check, or a redirect to
- *   `/login`.
+ *   `/login` that remembers the requested page.
  */
 export default function ProtectedRoute() {
+    const location = useLocation()
     const user = useAuthStore((s) => s.user)
     const isLoading = useAuthStore((s) => s.isLoading)
     const sessionCheckFailed = useAuthStore((s) => s.sessionCheckFailed)
@@ -54,5 +56,5 @@ export default function ProtectedRoute() {
     if (isLoading) return null
     if (user) return <Outlet />
     if (sessionCheckFailed) return <SessionCheckFailed />
-    return <Navigate to="/login" replace />
+    return <Navigate to="/login" replace state={{ from: location }} />
 }

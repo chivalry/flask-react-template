@@ -1,4 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import inspect
 
 from src_back.services.base import ChildRecordService, CRUDService
 from src_back.tests.conftest import Widget, WidgetNote
@@ -22,18 +23,28 @@ class RecordingCRUDService(CRUDService[Widget]):
     def __init__(self) -> None:
         super().__init__(Widget, Widget.name)
         self.deleted: list[str] = []
+        self.committed: list[tuple[str, bool]] = []
 
     def before_delete(self, record: Widget) -> None:
         self.deleted.append(record.name)
+
+    def after_delete(self, record: Widget) -> None:
+        # A deleted record is detached only once its deletion is committed.
+        self.committed.append((record.name, inspect(record).detached))
 
 
 class RecordingChildService(ChildRecordService[WidgetNote]):
     def __init__(self) -> None:
         super().__init__(WidgetNote, 'widget_id', WidgetNote.id)
         self.deleted: list[str | None] = []
+        self.committed: list[tuple[str | None, bool]] = []
 
     def before_delete(self, record: WidgetNote) -> None:
         self.deleted.append(record.body)
+
+    def after_delete(self, record: WidgetNote) -> None:
+        # A deleted record is detached only once its deletion is committed.
+        self.committed.append((record.body, inspect(record).detached))
 
 
 # -- CRUDService --------------------------------------------------------------
@@ -85,11 +96,12 @@ def test_crud_update_returns_none_for_missing_record(db: SQLAlchemy) -> None:
     assert CRUDService(Widget, Widget.name).update(999, {'name': 'x'}) is None
 
 
-def test_crud_delete_calls_hook_and_removes_record(db: SQLAlchemy) -> None:
+def test_crud_delete_calls_hooks_and_removes_record(db: SQLAlchemy) -> None:
     widget = _make_widget(db)
     service = RecordingCRUDService()
     assert service.delete(widget.id) is True
     assert service.deleted == ['alpha']
+    assert service.committed == [('alpha', True)]
     assert db.session.get(Widget, widget.id) is None
 
 
@@ -97,11 +109,17 @@ def test_crud_delete_returns_false_for_missing_record(db: SQLAlchemy) -> None:
     service = RecordingCRUDService()
     assert service.delete(999) is False
     assert service.deleted == []
+    assert service.committed == []
 
 
 def test_crud_default_before_delete_is_a_no_op(db: SQLAlchemy) -> None:
     widget = _make_widget(db)
     assert CRUDService(Widget, Widget.name).before_delete(widget) is None
+
+
+def test_crud_default_after_delete_is_a_no_op(db: SQLAlchemy) -> None:
+    widget = _make_widget(db)
+    assert CRUDService(Widget, Widget.name).after_delete(widget) is None
 
 
 # -- ChildRecordService -------------------------------------------------------
@@ -165,11 +183,12 @@ def test_child_update_ignores_parent_id_in_body(db: SQLAlchemy) -> None:
     assert note.body == 'after'
 
 
-def test_child_delete_calls_hook_and_removes_record(db: SQLAlchemy) -> None:
+def test_child_delete_calls_hooks_and_removes_record(db: SQLAlchemy) -> None:
     note = _make_note(db, _make_widget(db), 'doomed')
     service = RecordingChildService()
     service.delete(note)
     assert service.deleted == ['doomed']
+    assert service.committed == [('doomed', True)]
     assert db.session.get(WidgetNote, note.id) is None
 
 
@@ -177,3 +196,9 @@ def test_child_default_before_delete_is_a_no_op(db: SQLAlchemy) -> None:
     note = _make_note(db, _make_widget(db))
     service = ChildRecordService(WidgetNote, 'widget_id', WidgetNote.id)
     assert service.before_delete(note) is None
+
+
+def test_child_default_after_delete_is_a_no_op(db: SQLAlchemy) -> None:
+    note = _make_note(db, _make_widget(db))
+    service = ChildRecordService(WidgetNote, 'widget_id', WidgetNote.id)
+    assert service.after_delete(note) is None
