@@ -1,6 +1,38 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
+/** Vendor chunk for each top-level `node_modules` directory it collects. */
+const VENDOR_CHUNKS: Record<string, string> = {
+    react: 'react',
+    'react-dom': 'react',
+    'react-router': 'react',
+    'react-router-dom': 'react',
+    scheduler: 'react',
+    '@emotion': 'mui',
+    '@mui': 'mui',
+    'react-transition-group': 'mui',
+    stylis: 'mui',
+    '@hookform': 'forms',
+    'react-hook-form': 'forms',
+    zod: 'forms',
+}
+
+/**
+ * Name the vendor chunk a module belongs to.
+ *
+ * Vendor chunks change only when dependencies do, so they keep their hashes across
+ * deploys that change only application code. Rollup places everything else, and
+ * Vite 8 drops the object form of `manualChunks`, so this is the function form.
+ *
+ * @param id - The module's resolved path.
+ * @returns The chunk name, or `undefined` to let Rollup place the module.
+ */
+function vendorChunk(id: string): string | undefined {
+    // Greedy `.*` reaches the last node_modules segment, the package that owns the file.
+    const match = /.*\/node_modules\/(@[^/]+|[^/]+)\//.exec(id)
+    return match ? VENDOR_CHUNKS[match[1]] : undefined
+}
+
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), 'VITE_')
     const apiTarget = env.VITE_API_URL ?? 'http://localhost:5000'
@@ -41,6 +73,11 @@ export default defineConfig(({ mode }) => {
         build: {
             outDir: '../dist',
             emptyOutDir: true,
+            rollupOptions: {
+                output: {
+                    manualChunks: vendorChunk,
+                },
+            },
         },
         test: {
             globals: true,

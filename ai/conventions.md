@@ -63,6 +63,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   as stale. Only a 401 from `/me` ends the session; any other failure keeps the
   current user and raises `sessionCheckFailed`, which `ProtectedRoute` renders as a
   retry alert instead of a redirect. Pages render inside `AppShell`.
+- Pages load through `React.lazy` in `App.tsx`, so each ships in its own chunk, and
+  `AppShell` wraps its `Outlet` in `Suspense` so the app bar stays while a page loads.
+  `vite.config.ts` groups third-party code into the `react`, `mui`, and `forms` vendor
+  chunks; add a large new dependency to one of them in `VENDOR_CHUNKS`.
 - Forms use React Hook Form with Zod schemas; request errors surface through
   `useApiError`.
 - Every file starts with a `@file` JSDoc block, and every function, interface, and

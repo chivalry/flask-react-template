@@ -2,6 +2,7 @@
 
 import { AppBar, Box, Button, Toolbar, Typography } from '@mui/material'
 import LogoutIcon from '@mui/icons-material/Logout'
+import { Suspense } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuthStore } from '../../store/auth'
@@ -73,6 +74,9 @@ function UserMenu() {
 /**
  * Render the navigation bar and an outlet for the active route.
  *
+ * The outlet has its own Suspense boundary, so the bar stays on screen while
+ * a page's chunk loads.
+ *
  * @returns The application shell.
  */
 export default function AppShell() {
@@ -89,7 +93,9 @@ export default function AppShell() {
                 </Toolbar>
             </AppBar>
             <Box component="main" sx={{ flex: 1, minHeight: 0 }}>
-                <Outlet />
+                <Suspense fallback={null}>
+                    <Outlet />
+                </Suspense>
             </Box>
         </Box>
     )
