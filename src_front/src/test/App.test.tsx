@@ -103,7 +103,9 @@ describe('App', () => {
 
         renderAppAtPath('/login')
 
-        expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+        expect(
+            await screen.findByRole('heading', { name: 'Sign in' }),
+        ).toBeInTheDocument()
         await waitFor(() => expect(useAuthStore.getState().isLoading).toBe(false))
     })
 
@@ -113,7 +115,7 @@ describe('App', () => {
         renderAppAtPath('/register')
 
         expect(
-            screen.getByRole('heading', { name: 'Create account' }),
+            await screen.findByRole('heading', { name: 'Create account' }),
         ).toBeInTheDocument()
         await waitFor(() => expect(useAuthStore.getState().isLoading).toBe(false))
     })
