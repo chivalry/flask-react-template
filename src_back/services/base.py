@@ -16,8 +16,9 @@ from src_back.extensions import Base, db
 class CRUDService[T: Base]:
     """Generic service for top-level resources with full CRUD operations.
 
-    Subclasses may override :meth:`before_delete` to add side effects, such as
-    removing files, that must run before the row is deleted.
+    Subclasses may override :meth:`before_delete` for side effects that must run
+    before the row is deleted, and :meth:`after_delete` for ones that must wait
+    for the commit, such as removing the record's stored files.
     """
 
     def __init__(self, model: type[T], *order_by: ColumnExpressionArgument[Any]) -> None:
@@ -94,7 +95,8 @@ class CRUDService[T: Base]:
     def delete(self, record_id: int) -> bool:
         """Delete a record by primary key.
 
-        Calls :meth:`before_delete` before the row is removed.
+        Calls :meth:`before_delete` before the row is removed and
+        :meth:`after_delete` once the deletion is committed.
 
         Args:
             record_id: The record's primary key.
@@ -108,6 +110,7 @@ class CRUDService[T: Base]:
         self.before_delete(record)
         db.session.delete(record)
         db.session.commit()
+        self.after_delete(record)
         return True
 
     def before_delete(self, record: T) -> None:
@@ -117,6 +120,18 @@ class CRUDService[T: Base]:
             record: The record about to be deleted.
         """
 
+    def after_delete(self, record: T) -> None:
+        """Run side effects once a deletion is committed. Override in subclasses.
+
+        This is where a service removes the record's stored files, through
+        :func:`~src_back.utils.delete_upload`: a commit that fails never reaches
+        this hook, so the row and its files stay together.
+
+        Args:
+            record: The deleted record, now detached from the session; the
+                column values it had are still readable.
+        """
+
 
 class ChildRecordService[T: Base]:
     """Generic service for child records owned by a parent resource.
@@ -124,7 +139,8 @@ class ChildRecordService[T: Base]:
     Unlike :class:`CRUDService`, :meth:`update` and :meth:`delete` accept a
     pre-fetched record instead of an id. The API layer fetches it with
     :meth:`get_for_parent` first, which is what enforces that a child can only
-    be reached through the parent that owns it.
+    be reached through the parent that owns it. :meth:`before_delete` and
+    :meth:`after_delete` work as they do on :class:`CRUDService`.
     """
 
     def __init__(
@@ -228,7 +244,8 @@ class ChildRecordService[T: Base]:
     def delete(self, record: T) -> None:
         """Delete a pre-fetched child record.
 
-        Calls :meth:`before_delete` before the row is removed. Existence was
+        Calls :meth:`before_delete` before the row is removed and
+        :meth:`after_delete` once the deletion is committed. Existence was
         already established by :meth:`get_for_parent`, so nothing is returned.
 
         Args:
@@ -237,10 +254,23 @@ class ChildRecordService[T: Base]:
         self.before_delete(record)
         db.session.delete(record)
         db.session.commit()
+        self.after_delete(record)
 
     def before_delete(self, record: T) -> None:
         """Run side effects before a record is deleted. Override in subclasses.
 
         Args:
             record: The record about to be deleted.
+        """
+
+    def after_delete(self, record: T) -> None:
+        """Run side effects once a deletion is committed. Override in subclasses.
+
+        This is where a service removes the record's stored files, through
+        :func:`~src_back.utils.delete_upload`: a commit that fails never reaches
+        this hook, so the row and its files stay together.
+
+        Args:
+            record: The deleted record, now detached from the session; the
+                column values it had are still readable.
         """

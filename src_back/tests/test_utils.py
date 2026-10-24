@@ -1,6 +1,7 @@
 import io
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from flask import Blueprint, Flask, Response, jsonify
@@ -17,6 +18,7 @@ from src_back.utils import (
     admin_required,
     bad_request,
     conflict,
+    delete_upload,
     dump_or_404,
     forbidden,
     new_uuid,
@@ -257,6 +259,44 @@ def test_validate_image_file_rejects_file_when_seek_raises_oserror(app: Flask) -
     assert rejection is not None
     _, status = rejection
     assert status == 400
+
+
+# -- delete_upload ------------------------------------------------------------
+
+
+def _upload_folder(app: Flask) -> Path:
+    folder = Path(app.config['UPLOAD_FOLDER'])
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def test_delete_upload_removes_the_stored_file(app: Flask) -> None:
+    stored = _upload_folder(app) / 'photo.png'
+    stored.write_bytes(PNG_BYTES)
+    delete_upload('photo.png')
+    assert not stored.exists()
+
+
+def test_delete_upload_ignores_a_missing_file(app: Flask) -> None:
+    _upload_folder(app)
+    assert delete_upload('missing.png') is None
+
+
+@pytest.mark.parametrize('filename', [None, ''])
+def test_delete_upload_does_nothing_without_a_filename(
+    app: Flask, filename: str | None
+) -> None:
+    folder = _upload_folder(app)
+    assert delete_upload(filename) is None
+    assert folder.is_dir()
+
+
+def test_delete_upload_leaves_files_outside_the_upload_folder(app: Flask) -> None:
+    outside = _upload_folder(app).parent / 'outside.txt'
+    outside.write_text('keep')
+    delete_upload('../outside.txt')
+    delete_upload(str(outside))
+    assert outside.exists()
 
 
 # -- admin_required -----------------------------------------------------------

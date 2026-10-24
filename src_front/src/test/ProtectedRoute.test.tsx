@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ProtectedRoute from '../components/ProtectedRoute'
@@ -16,11 +16,22 @@ const testUser: AuthUser = {
     updated_at: '2026-08-01T00:00:00Z',
 }
 
-const renderProtectedRoute = () =>
+// Shows the login page and the location the guard recorded in the redirect's state.
+const LoginStub = () => {
+    const from = useLocation().state?.from
+    return (
+        <>
+            <div>Login page</div>
+            <div>{`Recorded ${from?.pathname}${from?.search}${from?.hash}`}</div>
+        </>
+    )
+}
+
+const renderProtectedRoute = (path = '/protected') =>
     render(
-        <MemoryRouter initialEntries={['/protected']}>
+        <MemoryRouter initialEntries={[path]}>
             <Routes>
-                <Route path="/login" element={<div>Login page</div>} />
+                <Route path="/login" element={<LoginStub />} />
                 <Route element={<ProtectedRoute />}>
                     <Route path="/protected" element={<div>Protected content</div>} />
                 </Route>
@@ -56,6 +67,12 @@ describe('ProtectedRoute', () => {
 
         expect(screen.getByText('Login page')).toBeInTheDocument()
         expect(screen.queryByText('Protected content')).not.toBeInTheDocument()
+    })
+
+    it('records the requested path, query, and hash in the redirect', () => {
+        renderProtectedRoute('/protected?tab=2#top')
+
+        expect(screen.getByText('Recorded /protected?tab=2#top')).toBeInTheDocument()
     })
 
     it('offers a retry instead of redirecting when the session check failed', () => {

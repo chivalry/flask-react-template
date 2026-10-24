@@ -128,7 +128,8 @@ echo "==> Stopping existing containers..."
 compose down
 
 echo "==> Building and starting containers..."
-compose up -d --build
+# A service dropped from the Compose files would otherwise leave its container running.
+compose up -d --build --remove-orphans
 
 # docker/entrypoint.sh owns the migrations and the seed and starts gunicorn only after
 # both succeed, so a healthy backend means the schema is current. Running `db upgrade`

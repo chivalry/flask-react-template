@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Any, cast
 
 import filetype
-from flask import Response, jsonify, request
+from flask import Response, current_app, jsonify, request
 from flask_login import current_user
 from marshmallow import Schema
 from werkzeug.datastructures import FileStorage
+from werkzeug.security import safe_join
 
 from src_back.models import Role
 
@@ -270,6 +271,26 @@ def validate_image_file(file: FileStorage) -> ErrorResponse | None:
     if kind is None or kind.mime not in ALLOWED_IMAGE_MIMES:
         return bad_request('Invalid file type')
     return None
+
+
+def delete_upload(filename: str | None) -> None:
+    """Remove a stored upload from ``UPLOAD_FOLDER``, ignoring one already gone.
+
+    Call it after the commit that stops referencing the file, as a service's
+    ``after_delete`` does, so a failed commit never leaves a row pointing at a
+    removed file. An empty name does nothing, and a name that would resolve
+    outside ``UPLOAD_FOLDER`` is ignored, just as ``send_from_directory``
+    refuses to serve one.
+
+    Args:
+        filename: Path of the file relative to ``UPLOAD_FOLDER``, as the record
+            stores it, or ``None`` for a record without a file.
+    """
+    if not filename:
+        return
+    path = safe_join(current_app.config['UPLOAD_FOLDER'], filename)
+    if path is not None:
+        Path(path).unlink(missing_ok=True)
 
 
 def admin_required[**P, R](f: Callable[P, R]) -> Callable[P, R | ErrorResponse]:

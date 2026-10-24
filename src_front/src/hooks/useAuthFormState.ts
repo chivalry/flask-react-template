@@ -1,22 +1,40 @@
 /** @file Shared submit handling for the login and registration forms. */
 
 import type { AxiosResponse } from 'axios'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import { useAuthStore } from '../store/auth'
 import type { AuthUser } from '../types/auth'
 import { useApiError } from './useApiError'
+
+/** What `ProtectedRoute` records about the page a signed-out visitor asked for. */
+interface RedirectState {
+    from?: { pathname?: string; search?: string; hash?: string }
+}
+
+/**
+ * Find where to go after signing in.
+ *
+ * @param state - The login page's location state.
+ * @returns The requested path with its query and hash, or `/` without one.
+ */
+function requestedPath(state: unknown): string {
+    const from = (state as RedirectState | null)?.from
+    if (!from?.pathname) return '/'
+    return `${from.pathname}${from.search ?? ''}${from.hash ?? ''}`
+}
 
 /**
  * Provide error state and a submit handler shared by both auth forms.
  *
  * @returns The current API error message, or null, and `handleAuthAction`,
  *   which runs an auth request, stores the user it returns, and navigates to
- *   `/`. On failure it records the error message in `apiError` instead of
- *   throwing.
+ *   the requested page, or to `/` when none was recorded. On failure it
+ *   records the error message in `apiError` instead of throwing.
  */
 export function useAuthFormState() {
     const navigate = useNavigate()
+    const location = useLocation()
     const setUser = useAuthStore((s) => s.setUser)
     const { error: apiError, onErr, clearError } = useApiError()
 
@@ -40,7 +58,7 @@ export function useAuthFormState() {
         try {
             const { data: user } = await action()
             setUser(user)
-            navigate('/')
+            navigate(requestedPath(location.state))
         } catch (err: unknown) {
             onErr(err instanceof Error ? err : new Error(fallback))
         }

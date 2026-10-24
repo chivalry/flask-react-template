@@ -58,6 +58,9 @@ def app(tmp_path: Path) -> Iterator[Flask]:
         # Release the session's locks first; on Postgres they block DROP TABLE forever.
         _db.session.remove()
         _db.drop_all()
+        # Close this app's pooled connections now. Waiting for garbage collection lets a
+        # long run exhaust Postgres's connection limit.
+        _db.engine.dispose()
 
 
 @pytest.fixture()
