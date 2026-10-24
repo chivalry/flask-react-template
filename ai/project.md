@@ -82,3 +82,12 @@ All commands run from the repo root via npm scripts. Python tooling always goes 
 `.env.example` documents every variable. `scripts/up.sh` rewrites the port variables
 when a port is busy; `scripts/worktree-setup.sh` shifts them per worktree. Outside
 `FLASK_ENV=development`, the app refuses to start with a placeholder `SECRET_KEY`.
+
+## Worktrees
+
+When the clone is a bare-repo container (README, Worktrees), `main/` stays on `main`
+and each issue gets a sibling worktree with its own `.env`, `COMPOSE_PROJECT_NAME`,
+ports, `.venv`, and `node_modules`; `/plan-issue` and `/plan-pr` create it through
+`scripts/worktree-setup.sh`. Run every session inside a worktree, never in the
+container directory, which has no project settings, hooks, or scripts. Never check an
+issue branch out in `main/`.

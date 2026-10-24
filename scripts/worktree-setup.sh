@@ -3,16 +3,17 @@
 #
 # Run from the bare-repo container directory (the one holding main/ and the other
 # worktrees). Creates a sibling worktree for <branch>, fully bootstrapped: .env,
-# virtualenv, node_modules, per-worktree git hooks, and an isolated Docker Compose
-# project with shifted host ports.
+# virtualenv, node_modules, git hooks, and an isolated Docker Compose project with
+# shifted host ports.
 #
 # <port-offset> shifts the database, backend, and frontend host ports so several
-# worktrees can run the full Docker stack at once. Use a distinct integer per
-# worktree (0, 1, 2, ...).
+# worktrees can run the full Docker stack at once. Omit it to take the smallest
+# offset from 1 up that no sibling worktree's .env reserves and whose ports are all
+# free; main/ keeps offset 0.
 set -eu
 
 branch="${1:-}"
-offset="${2:-0}"
+offset="${2:-}"
 
 if [ -z "$branch" ]; then
   echo "usage: worktree-setup.sh <branch> [<port-offset>]" >&2
@@ -41,6 +42,28 @@ else
 fi
 
 cd "$slug"
+
+# offset_taken N -> true when a sibling worktree's .env already holds one of offset
+# N's ports, or something listens on one. A stopped stack listens on nothing, and
+# other projects hold ports no .env here names, so both checks are needed.
+offset_taken() {
+  db=$((5432 + $1)) backend=$((5000 + $1)) frontend=$((5174 + $1))
+  grep -qsE "^(DB_PORT=$db|BACKEND_PORT=$backend|FRONTEND_PORT=$frontend)\$" \
+    ../*/.env && return 0
+  for port in "$db" "$backend" "$frontend"; do
+    lsof -i TCP:"$port" -sTCP:LISTEN -n -P 2>/dev/null | grep -q LISTEN && return 0
+  done
+  return 1
+}
+
+# Pick the offset just before this worktree's .env is written, so setups started
+# together see each other's reservations.
+if [ -z "$offset" ]; then
+  offset=1
+  while offset_taken "$offset"; do
+    offset=$((offset + 1))
+  done
+fi
 
 # Secrets are not tracked; start from the main worktree's .env, else the example.
 if [ -f ../main/.env ]; then
@@ -73,17 +96,16 @@ set_env VITE_API_URL "http://localhost:$backend_port"
 set_env DATABASE_URL "postgresql://app:app@localhost:$db_port/app"
 
 # Backend venv (tests use in-memory SQLite, no Docker) and frontend deps.
+#
+# npm install runs husky's prepare script, which sets the shared core.hooksPath to
+# the relative .husky/_, so it resolves inside each worktree. Do NOT enable
+# extensions.worktreeConfig: with core.bare=true it makes git treat every worktree
+# as bare.
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 npm install
 
-# Hooks: point core.hooksPath at the tracked, relative .husky so it resolves per
-# worktree. husky keeps this value relative across npm installs, so a shared
-# (common-config) setting works for every worktree. Do NOT enable
-# extensions.worktreeConfig: with core.bare=true it makes git treat every
-# worktree as bare. Set last so the npm install above cannot leave a stale value.
-git config core.hooksPath .husky
-
 echo "Worktree '$branch' ready at $(pwd)"
 echo "  COMPOSE_PROJECT_NAME=$repo-$slug"
+echo "  port offset $offset"
 echo "  DB_PORT=$db_port BACKEND_PORT=$backend_port FRONTEND_PORT=$frontend_port"

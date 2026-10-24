@@ -58,16 +58,16 @@ Tier 3, heavy or coupled:
 
 ## Working in parallel
 
-### One checkout per agent
+### One worktree per agent
 
-In a single checkout, `/plan-issue` requires a clean tree and runs
-`git switch -c issue-<n>-<slug>` there, so two agents sharing a checkout abort or pull
-each other off their branches. Give each agent its own clone or
-`git worktree add ../<dir> --detach origin/main`. Give each its own `.env` whose
-`COMPOSE_PROJECT_NAME` differs from every other checkout's: a shared name makes the
-Docker stacks replace each other, while `npm run docker:up` already reassigns busy
-ports. Build `.venv` and `node_modules` there before running `/plan-issue <n>`.
-`scripts/worktree-setup.sh` automates this only for the bare-repo layout.
+Since 2026-10-24 the local clone is a bare-repo container (README, Worktrees), so
+agents never share a checkout. Run `/plan-issue <n>` from a session in `main/`: it
+pushes the branch, opens the draft PR, and creates a sibling worktree through
+`scripts/worktree-setup.sh`, with its own `.env`, `COMPOSE_PROJECT_NAME`, free ports,
+`.venv`, and `node_modules`, then writes the plan inside it. Open that worktree in its
+own VS Code window and run `/implement-plan` there. Never check an issue branch out in
+`main/`, and never start a session in the container directory. Start parallel
+`/plan-issue` runs a few seconds apart, since each setup fetches first.
 
 ### Alongside #10
 

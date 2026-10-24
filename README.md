@@ -52,19 +52,46 @@ survive rebuilds.
 
 ## Worktrees
 
-The repo works as a bare-repo container with one worktree per branch:
+To work on several branches at once, keep the clone as a bare-repo container with one
+worktree per branch. The bare repository lives in `.git`, and `main/` holds `main`:
 
 ```bash
-git clone --bare <your-repo-url> my-app && cd my-app
+mkdir my-app && cd my-app
+git clone --bare <your-repo-url> .git
 git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'  # bare clones skip it
-git worktree add main
-sh main/scripts/worktree-setup.sh feature/thing 1
+git fetch origin
+git worktree add main main
+```
+
+An existing clone converts in place and keeps its tags and local branches: move
+everything except `.git` out of it, run `git config core.bare true` and
+`git worktree add main main` there, then move `.env` into `main/` and rebuild `.venv`
+(a virtualenv embeds its own path) and `node_modules` in it.
+
+Each further branch gets its own worktree, created from the container directory:
+
+```bash
+sh main/scripts/worktree-setup.sh issue-12-some-slug
 ```
 
 `scripts/worktree-setup.sh` creates the worktree, copies `.env` from `main/`, gives the
-stack its own `COMPOSE_PROJECT_NAME` and ports shifted by the offset, installs the venv
-and `node_modules`, and points `core.hooksPath` at `.husky`, so several worktrees run
-side by side.
+stack its own `COMPOSE_PROJECT_NAME`, and shifts its ports by the smallest offset that
+no other worktree's `.env` reserves and nothing is listening on; a second argument sets
+the offset instead. It then installs the venv and `node_modules`, and `npm install`
+points the shared `core.hooksPath` at `.husky/_`, which resolves inside each worktree.
+
+Open each worktree in its own VS Code window, never the container directory: only a
+worktree has the `.vscode/settings.json` that points the Python extension at its
+`.venv`.
+
+Once a branch has merged, remove its stack, volumes, images, worktree, and local branch
+from the container directory:
+
+```bash
+(cd issue-12-some-slug && npm run docker:down -- -v --rmi local)
+git worktree remove issue-12-some-slug
+git branch -D issue-12-some-slug
+```
 
 ## Scripts
 
