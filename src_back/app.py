@@ -8,6 +8,7 @@ hard refresh.
 import logging
 import os
 from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ load_dotenv()
 _log = logging.getLogger(__name__)
 
 MAX_UPLOAD_MB = 25
+SESSION_LIFETIME_DAYS = 30
 
 _PLACEHOLDER_SECRET_KEYS = frozenset(
     {'dev-secret', 'change-me', 'change-me-in-production'}
@@ -96,7 +98,9 @@ def _configure_application(app: Flask) -> None:
 
     Development-friendly defaults keep the app starting with no ``.env``
     present. Uploads are resolved to an absolute path and capped at
-    ``MAX_UPLOAD_MB``.
+    ``MAX_UPLOAD_MB``. A sign-in lasts ``SESSION_LIFETIME_DAYS`` past its latest
+    request: login makes the session permanent, and Flask re-sends a permanent
+    session's cookie with a fresh expiry on every response.
 
     Args:
         app: The application being configured.
@@ -113,6 +117,7 @@ def _configure_application(app: Flask) -> None:
     app.config['SESSION_COOKIE_SECURE'] = (
         os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
     )
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=SESSION_LIFETIME_DAYS)
     app.config['UPLOAD_FOLDER'] = str(
         Path(os.environ.get('UPLOAD_FOLDER', 'src_back/uploads')).resolve()
     )

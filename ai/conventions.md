@@ -32,8 +32,11 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `load_instance = False`), set `Meta.model`, and mark `BaseSchema.AUDIT` dump-only.
   Auto schemas omit foreign-key columns; a child schema that accepts the parent id
   in the body sets `include_fk = True`.
-- Auth is a Flask-Login session cookie. Protect routes with `@login_required` or
-  `@admin_required` (401 for anonymous callers, 403 for non-admins).
+- Auth is a Flask-Login session cookie. Login and registration mark the session
+  permanent, so the cookie carries an expiry and survives a browser restart, and Flask
+  re-sends it with a fresh expiry on every response: a sign-in ends at logout or after
+  `SESSION_LIFETIME_DAYS` (30, in `app.py`) without a request. Protect routes with
+  `@login_required` or `@admin_required` (401 for anonymous callers, 403 for non-admins).
 - Every function and class has a Google-style docstring, and `pydoclint` checks that
   arguments and returns match it. Functions stay under 50 physical lines
   (`scripts/check_function_length.py`). `basedpyright` runs in standard mode.
