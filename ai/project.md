@@ -34,7 +34,8 @@ database rules that every contributor and agent follows.
 ## Commands
 
 All commands run from the repo root via npm scripts. Python tooling always goes through
-`.venv/bin/`.
+`.venv/bin/`, installed from `requirements-dev.txt`; `requirements.txt` holds only the
+runtime packages and is the file `docker/backend.Dockerfile` installs.
 
 - `npm run test` - frontend and backend suites in parallel, both with coverage
 - `npm run test:back` - `.venv/bin/python -m pytest` (100% coverage enforced)

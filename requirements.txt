@@ -1,3 +1,5 @@
+# Runtime packages only: docker/backend.Dockerfile installs this file. The lint,
+# type-check, and test tools live in requirements-dev.txt.
 Flask==3.1.0
 Flask-SQLAlchemy==3.1.1
 # SQLAlchemy 2.1 defaults postgresql:// to psycopg 3; 2.0 keeps the psycopg2 driver.
@@ -11,9 +13,3 @@ filetype==1.2.0
 psycopg2-binary==2.9.10
 python-dotenv==1.0.1
 gunicorn==23.0.0
-ruff==0.9.10
-pydoclint==0.9.1
-basedpyright==1.39.9
-pytest==8.3.5
-pytest-flask==1.3.0
-pytest-cov==6.1.0
