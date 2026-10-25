@@ -1,7 +1,9 @@
+import pytest
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect
 
-from src_back.services.base import ChildRecordService, CRUDService
+from src_back.services.base import ChildRecordService, CRUDService, require_unique_name
+from src_back.services.errors import DuplicateRecordError
 from src_back.tests.conftest import Widget, WidgetNote
 
 
@@ -202,3 +204,15 @@ def test_child_default_after_delete_is_a_no_op(db: SQLAlchemy) -> None:
     note = _make_note(db, _make_widget(db))
     service = ChildRecordService(WidgetNote, 'widget_id', WidgetNote.id)
     assert service.after_delete(note) is None
+
+
+# -- require_unique_name ------------------------------------------------------
+
+
+def test_require_unique_name_ignores_quote_style_but_not_case(db: SQLAlchemy) -> None:
+    widget = _make_widget(db, "O'Neil")
+    with pytest.raises(DuplicateRecordError) as raised:
+        require_unique_name(Widget, 'O’Neil', 'widget')
+    assert str(raised.value) == "A widget named O'Neil already exists."
+    assert require_unique_name(Widget, 'O’Neil', 'widget', except_id=widget.id) is None
+    assert require_unique_name(Widget, "o'neil", 'widget') is None

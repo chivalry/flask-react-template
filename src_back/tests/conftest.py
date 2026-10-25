@@ -13,6 +13,7 @@ from src_back.app import create_app
 from src_back.extensions import Base
 from src_back.extensions import db as _db
 from src_back.models import BaseMixin, Role, User
+from src_back.tests.helpers import persist
 
 # A 1x1 PNG: enough for filetype to sniff image/png.
 PNG_BYTES = (
@@ -77,18 +78,14 @@ def db(app: Flask) -> SQLAlchemy:
 def user(app: Flask) -> User:
     u = User(email='user@test.com', role=Role.user)
     u.set_password('password123')
-    _db.session.add(u)
-    _db.session.commit()
-    return u
+    return persist(u)
 
 
 @pytest.fixture()
 def admin_user(app: Flask) -> User:
     u = User(email='admin@test.com', role=Role.admin)
     u.set_password('adminpass123')
-    _db.session.add(u)
-    _db.session.commit()
-    return u
+    return persist(u)
 
 
 @pytest.fixture()

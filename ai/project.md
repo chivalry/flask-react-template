@@ -1,21 +1,28 @@
 # Project Instructions
 
-Replace "the application" below with the project's name and purpose when starting a
-project from this template. The sections describe the layout, the commands, and the
-database rules that every contributor and agent follows.
+Replace this paragraph with the project's name and purpose when starting a project from
+this template. The sections describe the layout, the commands, and the database rules
+that every contributor and agent follows.
 
 ## Project Structure
 
 - Backend: `src_back/` - Python/Flask
     - `api/` - Flask route handlers, one blueprint per domain
-    - `models.py` - SQLAlchemy models; split into a `models/` package when it grows
-    - `schemas/` - Marshmallow schemas; `schemas/base.py` holds `BaseSchema`
+    - `models/` - SQLAlchemy models, one module per domain; `base.py` holds
+      `BaseMixin`, `user.py` holds `Role` and `User`, and `__init__.py` re-exports every
+      model, so `from src_back.models import User` works and every table registers
+    - `schemas/` - Marshmallow schemas; `schemas/base.py` holds `BaseSchema` and
+      `validate_ids_exist()`
     - `services/` - business logic by domain; `services/base.py` holds the generic
-      `CRUDService` and `ChildRecordService`
-    - `tests/` - pytest; one `test_<module>.py` per module
+      `CRUDService`, `ChildRecordService`, and `require_unique_name()`, and
+      `services/errors.py` the exceptions services raise
+    - `tests/` - pytest; one `test_<module>.py` per module; `helpers.py` holds
+      `persist()`
     - `app.py` - application factory, error handlers, SPA and upload serving
+    - `auth.py` - `current_user` typed as `User`, for routes behind `@login_required`
     - `extensions.py` - shared Flask extensions and the declarative `Base`
-    - `utils.py` - error envelopes, pagination, request parsing, upload validation
+    - `utils.py` - error envelopes, pagination in memory and in SQL, query-string
+      parsing, quote folding, upload validation
 - Frontend: `src_front/src/` - React/TypeScript with Vite
     - `api/` - axios client and typed API modules
     - `components/` - React components; `components/layout/AppShell.tsx` is the shell
@@ -65,7 +72,12 @@ runtime packages and is the file `docker/backend.Dockerfile` installs.
   `Model.query`.
 - Migrations use Flask-Migrate/Alembic. Author with
   `.venv/bin/flask --app src_back.app db migrate -m "<slug>"`, review the file, apply
-  with `db upgrade`. Files are named `YYYY_MM_DD_<rev>_<slug>.py`.
+  with `db upgrade`, and confirm with `db check`, which must report that no new upgrade
+  operations were detected. Files are named `YYYY_MM_DD_<rev>_<slug>.py`.
+- Every foreign key declares `ondelete`, and a parent's collection of child rows also
+  sets `cascade='all, delete-orphan'`. The SQLite test database does not enforce
+  foreign keys, so only the ORM cascade makes a delete there behave as it does on
+  PostgreSQL.
 - `docker/entrypoint.sh` owns migrations: it runs `db upgrade` and the seed on every
   container start, in development and in production, and a non-zero exit stops the
   container. Seeds skip optional work themselves instead of failing. `scripts/deploy.sh`
@@ -84,6 +96,11 @@ runtime packages and is the file `docker/backend.Dockerfile` installs.
 `.env.example` documents every variable. `scripts/up.sh` rewrites the port variables
 when a port is busy; `scripts/worktree-setup.sh` shifts them per worktree. Outside
 `FLASK_ENV=development`, the app refuses to start with a placeholder `SECRET_KEY`.
+
+`src_back/app.py` calls `load_dotenv()` at import, so `.env` values are visible to pytest
+too. A test that depends on an environment variable sets or clears it with
+`monkeypatch` first, as the `FLASK_ENV` and `CORS_ALLOWED_ORIGINS` tests in
+`src_back/tests/test_app.py` do.
 
 ## Worktrees
 

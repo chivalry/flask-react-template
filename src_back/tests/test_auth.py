@@ -1,8 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
+import flask_login
 from flask import g
 from flask.testing import FlaskClient
 
+from src_back import auth
 from src_back.app import SESSION_LIFETIME_DAYS
 from src_back.models import User
 
@@ -170,3 +172,7 @@ def test_authenticated_request_extends_the_session_cookie(
 def test_me_unauthenticated(client: FlaskClient) -> None:
     r = client.get('/api/v1/auth/me')
     assert r.status_code == 401
+
+
+def test_typed_current_user_is_flask_logins_proxy() -> None:
+    assert auth.current_user is flask_login.current_user

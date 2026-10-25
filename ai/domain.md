@@ -24,3 +24,13 @@ to put new behavior in the right service.
 - `Widget` and `WidgetNote` - test-only models exercising the generic services and
   `BaseSchema`
 - `PNG_BYTES` - a minimal PNG for upload tests
+
+`src_back/tests/helpers.py` provides `persist(record)`, which adds a record, commits it,
+and returns it; use it instead of repeating those three lines.
+
+The `app` fixture keeps one application context pushed for the whole test, and every
+test-client request reuses it. Flask-Login caches the loaded user on `g` for that
+context, so the cache outlives a request: to make the next request read the session
+cookie again, drop it with `g.pop('_login_user', None)`, as `test_auth.py` and
+`test_app.py` do, and run a second client's requests inside a fresh `app.app_context()`
+so the two clients do not share one cached user.

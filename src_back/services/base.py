@@ -1,4 +1,4 @@
-"""Generic base classes for the service layer.
+"""Generic base classes and shared checks for the service layer.
 
 A service owns the database access for one resource so that API handlers stay
 thin: they parse the request, call the service, and serialize the result.
@@ -11,6 +11,37 @@ from typing import Any
 from sqlalchemy import ColumnExpressionArgument
 
 from src_back.extensions import Base, db
+from src_back.services.errors import DuplicateRecordError
+from src_back.utils import fold_quotes, fold_quotes_in_sql
+
+
+def require_unique_name(
+    model: type[Any], name: str, noun: str, except_id: int | None = None
+) -> None:
+    """Check that no other row has the name, whatever its quote style.
+
+    Case still counts: ``Buyer`` and ``buyer`` may coexist, ``O'Neil`` and ``O’Neil``
+    may not. Services call it from ``create`` and ``update`` before writing.
+
+    Args:
+        model: The table; it must have ``id`` and ``name`` columns.
+        name: The name the caller wants to store.
+        noun: The singular word for the message, such as ``project`` or ``widget``.
+        except_id: The id of the row being updated, which may keep its own name;
+            ``None`` on create.
+
+    Raises:
+        DuplicateRecordError: If a different row already has the name; the message
+            names that row as stored.
+    """
+    query = db.session.query(model).filter(
+        fold_quotes_in_sql(model.name) == fold_quotes(name)
+    )
+    if except_id is not None:
+        query = query.filter(model.id != except_id)
+    existing = query.first()
+    if existing is not None:
+        raise DuplicateRecordError(f'A {noun} named {existing.name} already exists.')
 
 
 class CRUDService[T: Base]:

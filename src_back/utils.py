@@ -1,14 +1,15 @@
 """Shared helpers for JSON error envelopes, pagination, request parsing, and uploads.
 
 Every error helper returns the ``{'error': message}`` envelope paired with its
-HTTP status code, so route handlers can ``return`` one directly.
+HTTP status code, so route handlers can ``return`` one directly. The quote-folding
+helpers compare text with straight and curly quotes treated as the same character.
 """
 
 import functools
 import math
 import uuid as uuid_lib
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -16,9 +17,13 @@ import filetype
 from flask import Response, current_app, jsonify, request
 from flask_login import current_user
 from marshmallow import Schema
+from sqlalchemy import ColumnElement, Select, func, select
+from sqlalchemy.orm import QueryableAttribute
+from sqlalchemy.sql.base import ExecutableOption
 from werkzeug.datastructures import FileStorage
 from werkzeug.security import safe_join
 
+from src_back.extensions import db
 from src_back.models import Role
 
 ALLOWED_IMAGE_EXTENSIONS = frozenset({'.jpg', '.jpeg', '.png', '.gif', '.webp'})
@@ -26,6 +31,11 @@ ALLOWED_IMAGE_MIMES = frozenset({'image/jpeg', 'image/png', 'image/gif', 'image/
 
 DEFAULT_PER_PAGE = 20
 MAX_PER_PAGE = 100
+
+QUOTE_FOLDS = {'‘': "'", '’': "'", '“': '"', '”': '"'}
+"""Each curly quote and the straight quote it matches."""
+
+_QUOTE_TRANSLATION = str.maketrans(QUOTE_FOLDS)
 
 ErrorResponse = tuple[Response, int]
 """A JSON error envelope paired with its HTTP status code."""
@@ -121,6 +131,37 @@ def new_uuid() -> str:
     return str(uuid_lib.uuid4())
 
 
+def fold_quotes(text: str) -> str:
+    """Replace curly quotes with their straight equivalents.
+
+    Args:
+        text: The text to fold.
+
+    Returns:
+        The text with every curly single or double quote made straight.
+    """
+    return text.translate(_QUOTE_TRANSLATION)
+
+
+def fold_quotes_in_sql(
+    expression: ColumnElement[Any] | QueryableAttribute[Any],
+) -> ColumnElement[Any]:
+    """Wrap a column in nested ``replace()`` calls that make curly quotes straight.
+
+    ``replace()`` exists in SQLite and PostgreSQL, so the SQL is the same on both.
+
+    Args:
+        expression: The column, mapped attribute, or expression to fold.
+
+    Returns:
+        The folded expression.
+    """
+    folded = expression.expression
+    for curly, straight in QUOTE_FOLDS.items():
+        folded = func.replace(folded, curly, straight)
+    return folded
+
+
 def pagination_args() -> tuple[int, int]:
     """Read the pagination query parameters with safe defaults.
 
@@ -143,6 +184,27 @@ def pagination_args() -> tuple[int, int]:
     return page, per_page
 
 
+def _page_envelope(items: object, total: int, page: int, per_page: int) -> dict[str, Any]:
+    """Wrap one page of items in the metadata every paginated response carries.
+
+    Args:
+        items: The page's items, as records or already serialized.
+        total: The number of items across every page.
+        page: The 1-based page number.
+        per_page: The page size; zero reports a single page.
+
+    Returns:
+        A mapping with ``items``, ``total``, ``page``, ``pages``, and ``per_page``.
+    """
+    return {
+        'items': items,
+        'total': total,
+        'page': page,
+        'pages': math.ceil(total / per_page) if per_page else 1,
+        'per_page': per_page,
+    }
+
+
 def paginate(items: list[Any], page: int, per_page: int) -> dict[str, Any]:
     """Slice an in-memory list into one page and wrap it with metadata.
 
@@ -155,16 +217,8 @@ def paginate(items: list[Any], page: int, per_page: int) -> dict[str, Any]:
         A mapping with the sliced ``items`` plus the ``total`` item count, the
         echoed ``page`` and ``per_page``, and the total number of ``pages``.
     """
-    total = len(items)
-    pages = math.ceil(total / per_page) if per_page else 1
     start = (page - 1) * per_page
-    return {
-        'items': items[start : start + per_page],
-        'total': total,
-        'page': page,
-        'pages': pages,
-        'per_page': per_page,
-    }
+    return _page_envelope(items[start : start + per_page], len(items), page, per_page)
 
 
 def parse_request_json(schema: Schema, *, partial: bool = False) -> dict[str, Any]:
@@ -186,6 +240,54 @@ def parse_request_json(schema: Schema, *, partial: bool = False) -> dict[str, An
     raw = request.get_json(silent=True)
     payload = raw if isinstance(raw, dict) else {}
     return cast(dict[str, Any], schema.load(payload, partial=partial))
+
+
+def parse_id_list(name: str) -> list[int]:
+    """Read a comma-separated list of integer ids from the query string.
+
+    Args:
+        name: The query parameter to read.
+
+    Returns:
+        The ids in request order, with blank entries skipped; empty when the
+        parameter is absent.
+
+    Raises:
+        ValueError: If any entry is not an integer.
+    """
+    raw = request.args.get(name, '')
+    try:
+        return [int(part) for part in raw.split(',') if part.strip()]
+    except ValueError as exc:
+        raise ValueError(f'{name} must be a comma-separated list of ids.') from exc
+
+
+def parse_query_date(name: str) -> date | None:
+    """Read an optional ``YYYY-MM-DD`` date from the query string.
+
+    ``date.fromisoformat`` also accepts compact and ISO week dates, such as ``20261014``
+    and ``2026-W42-3``, so the parsed date must format back to the value unchanged.
+
+    Args:
+        name: The query parameter to read.
+
+    Returns:
+        The date, or ``None`` when the parameter is absent or blank.
+
+    Raises:
+        ValueError: If the value is not a real date in ``YYYY-MM-DD`` form.
+    """
+    raw = request.args.get(name, '').strip()
+    if not raw:
+        return None
+    message = f'{name} must be a date in YYYY-MM-DD form.'
+    try:
+        parsed = date.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if parsed.isoformat() != raw:
+        raise ValueError(message)
+    return parsed
 
 
 def dump_or_404(record: object, schema: Schema) -> tuple[Response, int]:
@@ -223,6 +325,40 @@ def paginate_and_dump(
     if extra_fields:
         result.update(extra_fields)
     return jsonify(result), 200
+
+
+def paginate_select(
+    stmt: Select[Any], schema: Schema, *options: ExecutableOption
+) -> tuple[Response, int]:
+    """Run one page of an ORM ``select`` and serialize it with the usual envelope.
+
+    Unlike :func:`paginate_and_dump`, which slices a list already in memory, this
+    applies ``LIMIT`` and ``OFFSET`` in SQL and counts with a subquery, so it suits
+    tables too large to load whole. Loader options apply to the page query only,
+    which keeps the count a plain select.
+
+    ``total`` counts the rows ``stmt`` returns, so a join that multiplies them, such
+    as one to a child table used for filtering, inflates it: filter with ``EXISTS``
+    (``Model.children.any(...)``) instead. Load a page's collections with
+    ``selectinload``, which adds one query rather than multiplying rows.
+
+    Args:
+        stmt: The ORM select, already filtered and ordered.
+        schema: The schema used to serialize each row.
+        *options: Loader options, such as ``selectinload``, for the page rows.
+
+    Returns:
+        The pagination envelope with serialized ``items`` and status 200.
+    """
+    page, per_page = pagination_args()
+    count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+    total = db.session.scalar(count_stmt) or 0
+    window = stmt.limit(per_page).offset((page - 1) * per_page)
+    if options:
+        window = window.options(*options)
+    items = db.session.scalars(window).all()
+    envelope = _page_envelope(schema.dump(items, many=True), total, page, per_page)
+    return jsonify(envelope), 200
 
 
 def require_parent(getter: Callable[[int], Any], parent_id: int) -> ErrorResponse | None:

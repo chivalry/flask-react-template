@@ -17,13 +17,22 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - Blueprints are registered in `app.py`; each domain has one file in `src_back/api/`.
 - Handlers stay thin: `parse_request_json(schema)` validates the body (422 on
   failure), a service does the work, and `jsonify(schema.dump(...))`, `dump_or_404`,
-  or `paginate_and_dump` builds the response.
+  `paginate_and_dump` (slices a loaded list), or `paginate_select` (applies `LIMIT`
+  and `OFFSET` in SQL with a count subquery, for tables too large to load whole)
+  builds the response.
+- `parse_id_list(name)` reads a query parameter such as `?ids=3,1,2` and
+  `parse_query_date(name)` a strict `YYYY-MM-DD` date; both raise `ValueError`, which
+  the handler answers with `bad_request(str(exc))`.
 - Services in `src_back/services/` own business logic. Reuse `CRUDService` for
   top-level resources and `ChildRecordService` for nested ones. Its
   `get_for_parent()` is how nested routes validate parent ownership before mutating;
   `require_parent()` in `utils.py` answers 404 when the parent is missing, and
   `create()` and `update()` keep the URL's parent id authoritative over any parent id
   in the body.
+- A service that keeps names unique calls `require_unique_name()` from
+  `services/base.py` in `create` and `update`. It compares names with straight and
+  curly quotes treated alike but case still counting, and raises `DuplicateRecordError`
+  from `services/errors.py`, which the handler answers with `conflict(str(exc))`.
 - A service removes a stored file only after the commit that stops referencing it,
   through `delete_upload()` in `utils.py`, which ignores a file that is already gone:
   in `after_delete` for a deleted record, and after its own commit when an update
@@ -31,12 +40,17 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - Schemas extend `BaseSchema` (marshmallow-sqlalchemy auto schema with
   `load_instance = False`), set `Meta.model`, and mark `BaseSchema.AUDIT` dump-only.
   Auto schemas omit foreign-key columns; a child schema that accepts the parent id
-  in the body sets `include_fk = True`.
+  in the body sets `include_fk = True`. A schema that accepts a list of ids checks it
+  in a `@validates` method with `validate_ids_exist(model, ids, label)`, one `COUNT`
+  query, so an unknown id fails with a 422.
 - Auth is a Flask-Login session cookie. Login and registration mark the session
   permanent, so the cookie carries an expiry and survives a browser restart, and Flask
   re-sends it with a fresh expiry on every response: a sign-in ends at logout or after
   `SESSION_LIFETIME_DAYS` (30, in `app.py`) without a request. Protect routes with
   `@login_required` or `@admin_required` (401 for anonymous callers, 403 for non-admins).
+  Routes behind `@login_required` import `current_user` from `src_back/auth.py`, where
+  it is typed as `User`; code that checks `is_authenticated` itself, such as
+  `admin_required`, keeps Flask-Login's.
 - Every function and class has a Google-style docstring, and `pydoclint` checks that
   arguments and returns match it. Functions stay under 50 physical lines
   (`scripts/check_function_length.py`). `basedpyright` runs in standard mode.
@@ -75,7 +89,12 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `vite.config.ts` groups third-party code into the `react`, `mui`, and `forms` vendor
   chunks; add a large new dependency to one of them in `VENDOR_CHUNKS`.
 - Forms use React Hook Form with Zod schemas; request errors surface through
-  `useApiError`.
+  `useApiError`. The 422 envelope carries no field details (`app.py` only logs them),
+  so the Zod schemas enforce every backend validation rule; otherwise the user sees
+  just "Invalid request".
+- Component files export only components: `react-refresh/only-export-components` warns
+  on any other export except a primitive constant, and CI fails on warnings, so shared
+  constants and helpers live in `.ts` modules.
 - Every file starts with a `@file` JSDoc block, and every function, interface, and
   type alias has JSDoc without types in its tags. Functions stay under 50 lines.
 - Prettier: single quotes, no semicolons, 4-space indentation, print width 90.

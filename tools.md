@@ -39,9 +39,9 @@ Installed from `requirements.txt` into the backend image and into `.venv`.
   the migrations and runs the local development server.
 - **Werkzeug**: Flask's underlying WSGI toolkit, installed with Flask rather than
   pinned on its own. The code uses it directly for password hashing in
-  `src_back/models.py`, for the `NotFound` exception the SPA fallback catches when no
-  build is present, and for the `FileStorage` type and `safe_join` in the upload
-  helpers.
+  `src_back/models/user.py`, for the `NotFound` exception the SPA fallback catches
+  when no build is present, and for the `FileStorage` type and `safe_join` in the
+  upload helpers.
 - **SQLAlchemy 2**: the ORM. Models declare `Mapped[]` columns on the shared `Base` in
   `src_back/extensions.py`. It is pinned to the 2.0 line because 2.1 switches
   `postgresql://` URLs to the psycopg 3 driver.
