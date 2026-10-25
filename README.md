@@ -15,6 +15,8 @@ production, and scripts to provision and deploy a single server.
 | Tooling  | Ruff, basedpyright, pydoclint, pytest, ESLint, Prettier,     |
 |          | Vitest, fallow, Husky, markdownlint                          |
 
+[`tools.md`](tools.md) says why each tool and library in the repository is here.
+
 ## Quick start (local, no Docker)
 
 ```bash

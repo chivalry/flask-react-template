@@ -30,6 +30,7 @@ database rules that every contributor and agent follows.
 - `plans/` - implementation plans; authoritative while a feature is in progress
 - `scripts/` - local tooling (ports, worktrees) and server provisioning, deployment,
   TLS, and backup scripts
+- `tools.md` - why each tool and library is in the repository
 
 ## Commands
 
