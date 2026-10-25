@@ -32,13 +32,15 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
+          # The default key hashes only requirements.txt; the glob adds the dev file.
+          cache-dependency-path: requirements*.txt
 
       # The venv mirrors local development, where every Python tool runs as
       # .venv/bin/<tool>, and it is where pyproject.toml tells basedpyright to look.
       - name: Install dependencies
         run: |
           python -m venv .venv
-          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install -r requirements-dev.txt
 
       - name: Ruff lint
         run: .venv/bin/ruff check src_back scripts

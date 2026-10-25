@@ -24,7 +24,7 @@ cd my-app
 cp .env.example .env             # FLASK_ENV=development is already set
 
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements-dev.txt
 docker compose up -d db          # or point DATABASE_URL at your own PostgreSQL
 .venv/bin/flask --app src_back.app db upgrade
 .venv/bin/flask --app src_back.app run
@@ -49,6 +49,10 @@ npm run docker:down
 The backend container runs migrations and the seed on every start; a seed that exits
 non-zero stops the container. Uploaded files live in the `uploads_data` volume, so they
 survive rebuilds.
+
+The backend image installs only `requirements.txt`, the runtime packages. The lint,
+type-check, and test tools come from `requirements-dev.txt` and run from `.venv`, never
+inside the Compose containers.
 
 ## Worktrees
 

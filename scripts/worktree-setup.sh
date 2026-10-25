@@ -102,7 +102,7 @@ set_env DATABASE_URL "postgresql://app:app@localhost:$db_port/app"
 # extensions.worktreeConfig: with core.bare=true it makes git treat every worktree
 # as bare.
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements-dev.txt
 npm install
 
 echo "Worktree '$branch' ready at $(pwd)"
