@@ -5,9 +5,10 @@ from flask import Flask
 from marshmallow import ValidationError
 
 from src_back.models import User
-from src_back.schemas.base import BaseSchema
+from src_back.schemas.base import BaseSchema, validate_ids_exist
 from src_back.schemas.user import login_schema, user_schema
-from src_back.tests.conftest import WidgetNote
+from src_back.tests.conftest import Widget, WidgetNote
+from src_back.tests.helpers import persist
 
 
 class WidgetNoteSchema(BaseSchema):
@@ -67,3 +68,21 @@ def test_base_schema_marks_audit_columns_dump_only(app: Flask) -> None:
 
 def test_user_repr_names_the_email(app: Flask) -> None:
     assert repr(User(email='a@b.test')) == '<User a@b.test>'
+
+
+@pytest.mark.parametrize('ids', [None, []])
+def test_validate_ids_exist_accepts_an_omitted_or_empty_list(
+    app: Flask, ids: list[int] | None
+) -> None:
+    assert validate_ids_exist(Widget, ids, 'widget') is None
+
+
+def test_validate_ids_exist_counts_a_repeated_known_id_once(app: Flask) -> None:
+    widget = persist(Widget(name='a'))
+    assert validate_ids_exist(Widget, [widget.id, widget.id], 'widget') is None
+
+
+def test_validate_ids_exist_rejects_an_unknown_id(app: Flask) -> None:
+    widget = persist(Widget(name='a'))
+    with pytest.raises(ValidationError, match='Unknown widget id.'):
+        validate_ids_exist(Widget, [widget.id, widget.id + 1], 'widget')

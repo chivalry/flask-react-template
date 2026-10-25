@@ -17,6 +17,26 @@ production, and scripts to provision and deploy a single server.
 
 [`tools.md`](tools.md) says why each tool and library in the repository is here.
 
+## Starting a new project
+
+After creating a repository from this template, replace the template's name and
+placeholders:
+
+- `name` in `package.json`, the two matching `name` fields at the top of
+  `package-lock.json`, and `name` in `.devcontainer/devcontainer.json`
+- `COMPOSE_PROJECT_NAME` and `APP_NAME` in `.env.example`, and in `.env` if it already
+  exists
+- the fallback project name on the first line of `docker-compose.yml`
+- the `<title>` in `src_front/index.html`
+- the app bar title in `src_front/src/components/layout/AppShell.tsx`, and the tests
+  that expect it, `src_front/src/test/App.test.tsx` and
+  `src_front/src/test/AppShell.test.tsx`
+- this README's title and the `my-app` placeholders in its commands
+- the placeholder paragraphs at the top of `ai/project.md` and `ai/domain.md`
+
+`plans/archive/` holds the template's own finished plans. Delete them if the new project
+should start without that history; `plans/archive/.gitkeep` keeps the folder.
+
 ## Quick start (local, no Docker)
 
 ```bash
@@ -132,8 +152,9 @@ project/
 ├── ai/                # Project instructions for agents (see below)
 ├── src_back/          # Flask application
 │   ├── app.py         # Application factory, error handlers, SPA and uploads
+│   ├── auth.py        # current_user typed as User
 │   ├── extensions.py  # db (SQLAlchemy 2 Base), migrate, login_manager
-│   ├── models.py      # BaseMixin, Role, User
+│   ├── models/        # Package: base.py has BaseMixin, user.py has Role and User
 │   ├── utils.py       # Error envelopes, pagination, parsing, upload checks
 │   ├── api/           # Blueprints (health, auth)
 │   ├── schemas/       # Marshmallow schemas; base.py has BaseSchema

@@ -1,16 +1,22 @@
 import io
 import uuid
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 
 import pytest
 from flask import Blueprint, Flask, Response, jsonify
 from flask.testing import FlaskClient
+from flask_sqlalchemy import SQLAlchemy
 from marshmallow import Schema, ValidationError, fields
+from sqlalchemy import event, literal, select
+from sqlalchemy.orm import defer
 from werkzeug.datastructures import FileStorage
 
 from src_back.models import User
-from src_back.tests.conftest import PNG_BYTES
+from src_back.schemas.base import BaseSchema
+from src_back.tests.conftest import PNG_BYTES, Widget
+from src_back.tests.helpers import persist
 from src_back.utils import (
     DEFAULT_PER_PAGE,
     MAX_PER_PAGE,
@@ -20,13 +26,18 @@ from src_back.utils import (
     conflict,
     delete_upload,
     dump_or_404,
+    fold_quotes,
+    fold_quotes_in_sql,
     forbidden,
     new_uuid,
     not_found,
     now,
     paginate,
     paginate_and_dump,
+    paginate_select,
     pagination_args,
+    parse_id_list,
+    parse_query_date,
     parse_request_json,
     require_parent,
     unauthorized,
@@ -170,6 +181,52 @@ def test_parse_request_json_partial_allows_missing_required_fields(app: Flask) -
         assert parse_request_json(NameSchema(), partial=True) == {}
 
 
+# -- parse_id_list ------------------------------------------------------------
+
+
+def test_parse_id_list_keeps_request_order_and_skips_blanks(app: Flask) -> None:
+    with app.test_request_context('/?ids=3,1,,2'):
+        assert parse_id_list('ids') == [3, 1, 2]
+
+
+def test_parse_id_list_is_empty_when_absent(app: Flask) -> None:
+    with app.test_request_context('/'):
+        assert parse_id_list('ids') == []
+
+
+def test_parse_id_list_rejects_an_entry_that_is_not_an_integer(app: Flask) -> None:
+    with (
+        app.test_request_context('/?ids=1,x'),
+        pytest.raises(ValueError, match='ids must be a comma-separated list of ids'),
+    ):
+        parse_id_list('ids')
+
+
+# -- parse_query_date ---------------------------------------------------------
+
+
+@pytest.mark.parametrize('path', ['/', '/?due=', '/?due=+'])
+def test_parse_query_date_is_none_when_absent_or_blank(app: Flask, path: str) -> None:
+    with app.test_request_context(path):
+        assert parse_query_date('due') is None
+
+
+def test_parse_query_date_reads_an_iso_date(app: Flask) -> None:
+    with app.test_request_context('/?due=2026-10-14'):
+        assert parse_query_date('due') == date(2026, 10, 14)
+
+
+@pytest.mark.parametrize(
+    'value', ['tomorrow', '2026-13-01', '10/14/2026', '20261014', '2026-W42-3']
+)
+def test_parse_query_date_rejects_any_other_form(app: Flask, value: str) -> None:
+    with (
+        app.test_request_context('/', query_string={'due': value}),
+        pytest.raises(ValueError, match='due must be a date in YYYY-MM-DD form'),
+    ):
+        parse_query_date('due')
+
+
 # -- dump_or_404 and paginate_and_dump ----------------------------------------
 
 
@@ -205,6 +262,68 @@ def test_paginate_and_dump_merges_extra_fields(app: Flask) -> None:
         )
     assert status == 200
     assert response.get_json()['total_amount'] == '12.34'
+
+
+# -- paginate_select ----------------------------------------------------------
+
+
+class WidgetSchema(BaseSchema):
+    class Meta(BaseSchema.Meta):
+        model = Widget
+
+
+def _three_widgets() -> None:
+    for name in ('a', 'b', 'c'):
+        persist(Widget(name=name))
+
+
+def test_paginate_select_returns_one_sql_page_with_the_envelope(app: Flask) -> None:
+    _three_widgets()
+    with app.test_request_context('/?page=2&per_page=2'):
+        response, status = paginate_select(
+            select(Widget).order_by(Widget.id), WidgetSchema()
+        )
+    assert status == 200
+    body = response.get_json()
+    assert [item['name'] for item in body['items']] == ['c']
+    assert (body['total'], body['page'], body['pages'], body['per_page']) == (3, 2, 2, 2)
+
+
+def test_paginate_select_applies_loader_options_to_the_page_query(
+    app: Flask, db: SQLAlchemy
+) -> None:
+    _three_widgets()
+    statements: list[str] = []
+
+    def record(_conn: object, _cursor: object, statement: str, *_rest: object) -> None:
+        statements.append(statement)
+
+    event.listen(db.engine, 'before_cursor_execute', record)
+    try:
+        with app.test_request_context('/?per_page=10'):
+            response, _ = paginate_select(
+                select(Widget).order_by(Widget.id), WidgetSchema(), defer(Widget.name)
+            )
+    finally:
+        event.remove(db.engine, 'before_cursor_execute', record)
+    # The deferred column is missing from the page query; dumping loads it per row.
+    page_query = next(sql for sql in statements if 'LIMIT' in sql)
+    assert 'widgets.name' not in page_query
+    body = response.get_json()
+    assert [item['name'] for item in body['items']] == ['a', 'b', 'c']
+    assert (body['total'], body['pages']) == (3, 1)
+
+
+def test_paginate_select_with_no_rows_reports_zero_pages(app: Flask) -> None:
+    with app.test_request_context('/'):
+        response, _ = paginate_select(select(Widget), WidgetSchema())
+    assert response.get_json() == {
+        'items': [],
+        'total': 0,
+        'page': 1,
+        'pages': 0,
+        'per_page': DEFAULT_PER_PAGE,
+    }
 
 
 # -- require_parent -----------------------------------------------------------
@@ -355,3 +474,25 @@ def test_new_uuid_returns_string_parseable_as_uuid() -> None:
     value = new_uuid()
     assert len(value) == 36
     assert str(uuid.UUID(value)) == value
+
+
+# -- fold_quotes and fold_quotes_in_sql ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    ('text', 'folded'),
+    [
+        ('O’Neil', "O'Neil"),
+        ('‘quoted’', "'quoted'"),
+        ('“Ranch”', '"Ranch"'),
+        ('O\'Neil "Ranch"', 'O\'Neil "Ranch"'),
+    ],
+)
+def test_fold_quotes_makes_curly_quotes_straight(text: str, folded: str) -> None:
+    assert fold_quotes(text) == folded
+
+
+def test_fold_quotes_in_sql_matches_the_python_fold(db: SQLAlchemy) -> None:
+    value = '“O’Neil‘s”'
+    folded = db.session.scalar(select(fold_quotes_in_sql(literal(value))))
+    assert folded == fold_quotes(value) == '"O\'Neil\'s"'

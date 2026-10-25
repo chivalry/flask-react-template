@@ -1,8 +1,9 @@
 """Session authentication routes: register, login, logout, and identity."""
 
 from flask import Blueprint, Response, jsonify, session
-from flask_login import current_user, login_required, login_user, logout_user
+from flask_login import login_required, login_user, logout_user
 
+from src_back.auth import current_user
 from src_back.schemas.user import login_schema, user_schema
 from src_back.services.auth import authenticate_user, register_user
 from src_back.utils import ErrorResponse, conflict, parse_request_json, unauthorized
