@@ -89,6 +89,11 @@ def admin_user(app: Flask) -> User:
 
 
 @pytest.fixture()
+def passwordless_user(app: Flask) -> User:
+    return persist(User(email='nopass@test.com', role=Role.user))
+
+
+@pytest.fixture()
 def auth_client(client: FlaskClient, user: User) -> FlaskClient:
     client.post(
         '/api/v1/auth/login',

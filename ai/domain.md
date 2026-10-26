@@ -8,7 +8,9 @@ to put new behavior in the right service.
 
 - Accounts: `User` with the `admin` and `user` roles. Registration, login, logout,
   and the current-user lookup live in `src_back/api/auth.py` and
-  `src_back/services/auth.py`.
+  `src_back/services/auth.py`; `ai/auth.md` covers sign-in in depth. An account a
+  sign-in provider creates has no password (`password_hash` is `NULL`), which
+  `User.has_password` and the `has_password` field of the user payload report.
 
 ## Test Fixtures
 
@@ -20,6 +22,8 @@ to put new behavior in the right service.
 - `db` - the SQLAlchemy extension bound to the test app
 - `user` and `admin_user` - persisted accounts with the passwords `password123` and
   `adminpass123`
+- `passwordless_user` - a persisted account without a password, as a sign-in provider
+  creates one
 - `auth_client` and `admin_client` - clients signed in as those accounts
 - `Widget` and `WidgetNote` - test-only models exercising the generic services and
   `BaseSchema`

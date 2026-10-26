@@ -7,3 +7,7 @@ Route handlers catch them and answer with the matching envelope from
 
 class DuplicateRecordError(Exception):
     """A unique natural key, such as a name or an email, is already taken (409)."""
+
+
+class LastSignInMethodError(Exception):
+    """Removing a sign-in method would leave the account no way to sign in (409)."""

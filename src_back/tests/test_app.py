@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import NoReturn
 
@@ -237,3 +238,76 @@ def test_create_app_allows_real_secret_outside_development(
     monkeypatch.setenv('SECRET_KEY', 'a-long-random-secret')
     monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
     assert create_app().config['SECRET_KEY'] == 'a-long-random-secret'
+
+
+def test_public_base_url_defaults_to_the_dev_server_in_testing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv('PUBLIC_BASE_URL', raising=False)
+    monkeypatch.delenv('FRONTEND_PORT', raising=False)
+    app = create_app({'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
+    assert app.config['PUBLIC_BASE_URL'] == 'http://localhost:5174'
+
+
+def test_public_base_url_follows_frontend_port_in_development(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('FLASK_ENV', 'development')
+    monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
+    monkeypatch.setenv('FRONTEND_PORT', '5180')
+    monkeypatch.delenv('PUBLIC_BASE_URL', raising=False)
+    assert create_app().config['PUBLIC_BASE_URL'] == 'http://localhost:5180'
+
+
+def test_public_base_url_is_none_with_a_warning_outside_development(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv('FLASK_ENV', 'production')
+    monkeypatch.setenv('SECRET_KEY', 'a-long-random-secret')
+    monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
+    monkeypatch.delenv('PUBLIC_BASE_URL', raising=False)
+    with caplog.at_level(logging.WARNING, logger='src_back.app'):
+        app = create_app()
+    assert app.config['PUBLIC_BASE_URL'] is None
+    assert 'PUBLIC_BASE_URL is not set' in caplog.text
+
+
+def test_public_base_url_from_the_environment_drops_a_trailing_slash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('FLASK_ENV', 'production')
+    monkeypatch.setenv('SECRET_KEY', 'a-long-random-secret')
+    monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
+    monkeypatch.setenv('PUBLIC_BASE_URL', 'https://app.example.com/')
+    assert create_app().config['PUBLIC_BASE_URL'] == 'https://app.example.com'
+
+
+def test_public_base_url_override_wins_over_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('PUBLIC_BASE_URL', 'http://localhost:5174')
+    app = create_app(
+        {
+            'TESTING': True,
+            'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+            'PUBLIC_BASE_URL': 'https://app.test/',
+        }
+    )
+    assert app.config['PUBLIC_BASE_URL'] == 'https://app.test'
+
+
+@pytest.mark.parametrize(
+    ('rp_name', 'app_name', 'expected'),
+    [
+        ('Acme Passkeys', 'acme', 'Acme Passkeys'),
+        ('', 'acme', 'acme'),
+        ('', '', 'Flask React Template'),
+    ],
+)
+def test_webauthn_rp_name_falls_back_to_app_name_then_the_template_name(
+    monkeypatch: pytest.MonkeyPatch, rp_name: str, app_name: str, expected: str
+) -> None:
+    monkeypatch.setenv('WEBAUTHN_RP_NAME', rp_name)
+    monkeypatch.setenv('APP_NAME', app_name)
+    app = create_app({'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
+    assert app.config['WEBAUTHN_RP_NAME'] == expected

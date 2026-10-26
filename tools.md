@@ -58,9 +58,9 @@ Installed from `requirements.txt` into the backend image and into `.venv`.
   `migrations/env.py` takes the model metadata from the Flask app.
 - **Flask-Login**: session-cookie authentication. It provides `login_required`,
   `current_user`, the `UserMixin` on `User`, and the user loader; the app's
-  unauthorized handler makes it answer a JSON 401 instead of redirecting. Login and
-  registration make the session permanent, so a sign-in lasts 30 days past its latest
-  request.
+  unauthorized handler makes it answer a JSON 401 instead of redirecting. Every sign-in
+  goes through `complete_login()`, which makes the session permanent, so a sign-in
+  lasts 30 days past its latest request.
 - **Flask-Cors**: adds CORS headers for the origins in `CORS_ALLOWED_ORIGINS`, with
   credentials allowed, so a frontend served from another origin can call the API with
   its session cookie.

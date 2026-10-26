@@ -9,6 +9,8 @@ export interface AuthUser {
     uuid: string
     email: string
     role: Role
+    /** False for an account a sign-in provider created without a password. */
+    has_password: boolean
     created_at: string
     updated_at: string
 }

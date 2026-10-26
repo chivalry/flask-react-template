@@ -34,6 +34,11 @@ if [ -z "$DOMAIN" ]; then
   echo "ERROR: DOMAIN is empty in $REPO_DIR/.env. Refusing to deploy."
   exit 1
 fi
+if [ -z "$(get PUBLIC_BASE_URL)" ]; then
+  echo "ERROR: PUBLIC_BASE_URL is empty in $REPO_DIR/.env. Refusing to deploy."
+  echo "       Add PUBLIC_BASE_URL=https://$DOMAIN; ai/auth.md explains it."
+  exit 1
+fi
 BACKEND_PORT="$(get BACKEND_PORT)"; BACKEND_PORT="${BACKEND_PORT:-5000}"
 FRONTEND_HOST_PORT="$(get FRONTEND_HOST_PORT)"
 FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-8080}"

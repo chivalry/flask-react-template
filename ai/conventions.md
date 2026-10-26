@@ -43,14 +43,25 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   in the body sets `include_fk = True`. A schema that accepts a list of ids checks it
   in a `@validates` method with `validate_ids_exist(model, ids, label)`, one `COUNT`
   query, so an unknown id fails with a 422.
-- Auth is a Flask-Login session cookie. Login and registration mark the session
-  permanent, so the cookie carries an expiry and survives a browser restart, and Flask
-  re-sends it with a fresh expiry on every response: a sign-in ends at logout or after
+- Auth is a Flask-Login session cookie. Every sign-in ends in `complete_login(user)`
+  from `services/auth.py`, the only `login_user` call, so a new way to sign in (an
+  OAuth callback, a passkey check) calls it too. It marks the session permanent, so
+  the cookie carries an expiry and survives a browser restart, and Flask re-sends it
+  with a fresh expiry on every response: a sign-in ends at logout or after
   `SESSION_LIFETIME_DAYS` (30, in `app.py`) without a request. Protect routes with
   `@login_required` or `@admin_required` (401 for anonymous callers, 403 for non-admins).
   Routes behind `@login_required` import `current_user` from `src_back/auth.py`, where
   it is typed as `User`; code that checks `is_authenticated` itself, such as
   `admin_required`, keeps Flask-Login's.
+- `User` stores every email through `normalize_email()` in `models/user.py` (trimmed
+  and lowercased), however the account is created or edited, and lookups go through
+  `find_user_by_email()` in `services/auth.py`, so letter case never tells two
+  accounts apart. Compare emails no other way.
+- `app.config['PUBLIC_BASE_URL']` is the only source of the public origin. Build OAuth
+  redirect URIs and the WebAuthn origin from it, never from the request: there is no
+  `ProxyFix`, so the request does not know the public origin. Development and testing
+  default it to `http://localhost:$FRONTEND_PORT`; elsewhere it is `None` when unset,
+  and the features that need it stay off. `ai/auth.md` has the details.
 - Every function and class has a Google-style docstring, and `pydoclint` checks that
   arguments and returns match it. Functions stay under 50 physical lines
   (`scripts/check_function_length.py`). `basedpyright` runs in standard mode.

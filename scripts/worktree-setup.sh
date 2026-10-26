@@ -93,6 +93,7 @@ set_env DB_PORT "$db_port"
 set_env BACKEND_PORT "$backend_port"
 set_env FRONTEND_PORT "$frontend_port"
 set_env VITE_API_URL "http://localhost:$backend_port"
+set_env PUBLIC_BASE_URL "http://localhost:$frontend_port"
 set_env DATABASE_URL "postgresql://app:app@localhost:$db_port/app"
 
 # Backend venv (tests use in-memory SQLite, no Docker) and frontend deps.

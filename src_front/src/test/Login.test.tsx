@@ -16,6 +16,7 @@ const testUser: AuthUser = {
     uuid: 'user-uuid-1',
     email: 'tester@example.com',
     role: 'admin',
+    has_password: true,
     created_at: '2026-08-01T00:00:00Z',
     updated_at: '2026-08-01T00:00:00Z',
 }

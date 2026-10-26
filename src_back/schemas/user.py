@@ -11,6 +11,8 @@ class UserSchema(BaseSchema):
 
     ``password`` is load-only so it is never echoed back, and ``role`` is
     dump-only so a client cannot grant itself privileges at registration.
+    ``has_password`` is dump-only too: it tells the client whether the account has a
+    password without exposing the hash.
     """
 
     class Meta(BaseSchema.Meta):
@@ -27,6 +29,7 @@ class UserSchema(BaseSchema):
         validate=validate.Length(min=8, error='Password must be at least 8 characters.'),
     )
     role = fields.Enum(Role, by_value=True, dump_only=True)
+    has_password = fields.Boolean(dump_only=True)
 
 
 class LoginSchema(Schema):
