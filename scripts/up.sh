@@ -52,7 +52,7 @@ if [ "$flask_env" != "production" ] && [ -z "$already_running" ]; then
     | sed "s/^FRONTEND_PORT=.*/FRONTEND_PORT=${frontend_port}/" \
     | sed "s|^VITE_API_URL=.*|VITE_API_URL=http://localhost:${backend_port}|" \
     | sed "s|^PUBLIC_BASE_URL=\$|PUBLIC_BASE_URL=http://localhost:${frontend_port}|" \
-    | sed -E "s|^(PUBLIC_BASE_URL=http://localhost:)[0-9]+\$|\1${frontend_port}|" \
+    | sed -E "s|^(PUBLIC_BASE_URL=http://localhost:)[0-9]+(/?)\$|\1${frontend_port}\2|" \
     | sed -E "s|^(DATABASE_URL=.*@localhost):[0-9]+/|\1:${db_port}/|" > "$tmp"
   mv "$tmp" .env
 

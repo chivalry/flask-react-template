@@ -33,6 +33,10 @@ Decided with the user on 2026-10-25, beyond the issue's text:
    logger, as Flask-Migrate's own template does. Without it, `fileConfig()` in `env.py`
    disabled the logger Flask-Migrate reports errors through, so the migration's abort,
    like every `flask db` error, exited 1 with no message.
+6. From the PR review on 2026-10-25: Docker dev passes the `.env` value of
+   `PUBLIC_BASE_URL` through, falling back to `http://localhost:${FRONTEND_PORT:-5174}`,
+   so the backend never ignores a configured origin; and `up.sh` also moves a localhost
+   value that ends in a slash.
 
 Adopted from an independent design review:
 
@@ -1161,7 +1165,7 @@ production would inherit the development localhost value.
 - `docker-compose.yml`, after line 33 (`CORS_ALLOWED_ORIGINS: ...`):
 
     ```yaml
-          PUBLIC_BASE_URL: 'http://localhost:${FRONTEND_PORT:-5174}'
+          PUBLIC_BASE_URL: '${PUBLIC_BASE_URL:-http://localhost:${FRONTEND_PORT:-5174}}'
           WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-}
     ```
 
@@ -1206,24 +1210,25 @@ The rewrite follows `DATABASE_URL`'s pattern: only a blank or localhost value mo
 a custom origin such as a tunnel survives. The first new sed fills a blank value, and
 the second moves a localhost one to the new port. Three edits:
 
-1. Line 45: append `PUBLIC_BASE_URL` to the `for key in` list, so an older `.env` gets
-   a line for the sed to edit.
-2. After line 53 (the `VITE_API_URL` sed), insert:
+First, on line 45, append `PUBLIC_BASE_URL` to the `for key in` list, so an older
+`.env` gets a line for the sed to edit. Second, after line 53 (the `VITE_API_URL` sed),
+insert these two lines. The second keeps an optional trailing slash, which the app
+accepts:
 
-    ```sh
-        | sed "s|^PUBLIC_BASE_URL=\$|PUBLIC_BASE_URL=http://localhost:${frontend_port}|" \
-        | sed -E "s|^(PUBLIC_BASE_URL=http://localhost:)[0-9]+\$|\1${frontend_port}|" \
-    ```
+```sh
+    | sed "s|^PUBLIC_BASE_URL=\$|PUBLIC_BASE_URL=http://localhost:${frontend_port}|" \
+    | sed -E "s|^(PUBLIC_BASE_URL=http://localhost:)[0-9]+(/?)\$|\1${frontend_port}\2|" \
+```
 
-3. Lines 58-61: replace the four echo lines with these five, realigned:
+Third, on lines 58-61, replace the four echo lines with these five, realigned:
 
-    ```sh
-      echo "  DB_PORT         = ${db_port}"
-      echo "  BACKEND_PORT    = ${backend_port}"
-      echo "  FRONTEND_PORT   = ${frontend_port}"
-      echo "  VITE_API_URL    = http://localhost:${backend_port}"
-      echo "  PUBLIC_BASE_URL = $(read_env PUBLIC_BASE_URL .env)"
-    ```
+```sh
+  echo "  DB_PORT         = ${db_port}"
+  echo "  BACKEND_PORT    = ${backend_port}"
+  echo "  FRONTEND_PORT   = ${frontend_port}"
+  echo "  VITE_API_URL    = http://localhost:${backend_port}"
+  echo "  PUBLIC_BASE_URL = $(read_env PUBLIC_BASE_URL .env)"
+```
 
 ### `ai/auth.md` — new runbook
 
@@ -1262,8 +1267,9 @@ created it.
   A trailing slash is stripped. OAuth redirect URIs and the WebAuthn origin are built
   from it, never from the request.
     - Development and testing default it to `http://localhost:$FRONTEND_PORT`.
-      `docker-compose.yml` sets it the same way, and `scripts/up.sh` and
-      `scripts/worktree-setup.sh` rewrite it in `.env` along with the ports.
+      `docker-compose.yml` passes the `.env` value to the backend with the same
+      fallback. `scripts/up.sh` moves a blank or localhost value along with the ports,
+      and `scripts/worktree-setup.sh` sets one per worktree.
     - In production `scripts/provision.sh` writes `https://$DOMAIN`, and
       `scripts/deploy.sh` refuses to deploy while it is empty. Unset anywhere else, it
       is `None`, and the app logs that OAuth sign-in and passkeys are disabled.

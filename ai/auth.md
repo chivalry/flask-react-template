@@ -30,8 +30,9 @@ created it.
   A trailing slash is stripped. OAuth redirect URIs and the WebAuthn origin are built
   from it, never from the request.
     - Development and testing default it to `http://localhost:$FRONTEND_PORT`.
-      `docker-compose.yml` sets it the same way, and `scripts/up.sh` and
-      `scripts/worktree-setup.sh` rewrite it in `.env` along with the ports.
+      `docker-compose.yml` passes the `.env` value to the backend with the same
+      fallback. `scripts/up.sh` moves a blank or localhost value along with the ports,
+      and `scripts/worktree-setup.sh` sets one per worktree.
     - In production `scripts/provision.sh` writes `https://$DOMAIN`, and
       `scripts/deploy.sh` refuses to deploy while it is empty. Unset anywhere else, it
       is `None`, and the app logs that OAuth sign-in and passkeys are disabled.

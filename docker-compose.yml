@@ -31,7 +31,7 @@ services:
       FLASK_RUN_HOST: '0.0.0.0'
       SECRET_KEY: change-me
       CORS_ALLOWED_ORIGINS: 'http://localhost:${FRONTEND_PORT:-5174}'
-      PUBLIC_BASE_URL: 'http://localhost:${FRONTEND_PORT:-5174}'
+      PUBLIC_BASE_URL: '${PUBLIC_BASE_URL:-http://localhost:${FRONTEND_PORT:-5174}}'
       WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-}
       UPLOAD_FOLDER: src_back/uploads
     entrypoint: ['/bin/sh', 'docker/entrypoint.sh']
