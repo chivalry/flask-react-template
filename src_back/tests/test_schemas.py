@@ -2,12 +2,17 @@ from typing import Any, cast
 
 import pytest
 from flask import Flask
-from marshmallow import ValidationError
+from marshmallow import Schema, ValidationError
 
-from src_back.models import User
+from src_back.models import Role, User
 from src_back.models.user import normalize_email
 from src_back.schemas.base import BaseSchema, validate_ids_exist
-from src_back.schemas.user import login_schema, user_schema
+from src_back.schemas.user import (
+    login_schema,
+    registration_schema,
+    user_schema,
+    user_update_schema,
+)
 from src_back.tests.conftest import Widget, WidgetNote
 from src_back.tests.helpers import persist
 
@@ -28,6 +33,7 @@ def test_user_schema_dump_exposes_public_fields_only(user: User) -> None:
         'uuid',
         'email',
         'role',
+        'is_active',
         'has_password',
         'created_at',
         'updated_at',
@@ -42,25 +48,67 @@ def test_user_schema_dump_reports_a_passwordless_account(passwordless_user: User
     assert data['has_password'] is False
 
 
-def test_user_schema_load_returns_email_and_password_only() -> None:
+def test_user_schema_load_defaults_to_an_active_user() -> None:
     data = user_schema.load({'email': 'a@b.test', 'password': 'password123'})
-    assert data == {'email': 'a@b.test', 'password': 'password123'}
+    assert data == {
+        'email': 'a@b.test',
+        'password': 'password123',
+        'role': Role.user,
+        'is_active': True,
+    }
 
 
-def test_user_schema_rejects_client_supplied_audit_or_role_fields() -> None:
-    with pytest.raises(ValidationError):
-        user_schema.load(
-            {'email': 'a@b.test', 'password': 'password123', 'role': 'admin'}
-        )
+def test_user_schema_lets_an_admin_set_role_and_is_active() -> None:
+    data = user_schema.load(
+        {
+            'email': 'a@b.test',
+            'password': 'password123',
+            'role': 'admin',
+            'is_active': False,
+        }
+    )
+    assert data['role'] is Role.admin
+    assert data['is_active'] is False
+
+
+def test_user_schema_rejects_client_supplied_audit_fields() -> None:
     with pytest.raises(ValidationError):
         user_schema.load({'email': 'a@b.test', 'password': 'password123', 'id': 7})
 
 
-def test_user_schema_rejects_short_password_and_bad_email() -> None:
+def test_registration_schema_loads_email_and_password_only() -> None:
+    data = registration_schema.load({'email': 'a@b.test', 'password': 'password123'})
+    assert data == {'email': 'a@b.test', 'password': 'password123'}
+
+
+@pytest.mark.parametrize(('field', 'value'), [('role', 'admin'), ('is_active', False)])
+def test_registration_schema_rejects_role_and_is_active(
+    field: str, value: object
+) -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        registration_schema.load(
+            {'email': 'a@b.test', 'password': 'password123', field: value}
+        )
+    assert excinfo.value.messages == {field: ['Unknown field.']}
+
+
+@pytest.mark.parametrize(
+    'schema', [user_schema, registration_schema], ids=['user', 'registration']
+)
+def test_account_schemas_reject_short_password_and_bad_email(schema: Schema) -> None:
     with pytest.raises(ValidationError):
-        user_schema.load({'email': 'a@b.test', 'password': 'short'})
+        schema.load({'email': 'a@b.test', 'password': 'short'})
     with pytest.raises(ValidationError):
-        user_schema.load({'email': 'not-an-email', 'password': 'password123'})
+        schema.load({'email': 'not-an-email', 'password': 'password123'})
+
+
+def test_user_update_schema_accepts_an_empty_payload() -> None:
+    assert user_update_schema.load({}) == {}
+
+
+def test_user_update_schema_rejects_a_short_password() -> None:
+    with pytest.raises(ValidationError):
+        user_update_schema.load({'password': 'short'})
 
 
 def test_login_schema_requires_both_fields_and_accepts_short_passwords() -> None:

@@ -3,7 +3,7 @@
 import enum
 
 from flask_login import UserMixin
-from sqlalchemy import Enum, String
+from sqlalchemy import Boolean, Enum, String, true
 from sqlalchemy.orm import Mapped, mapped_column, validates
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -15,7 +15,8 @@ class Role(enum.StrEnum):
     """Application roles.
 
     Only :attr:`admin` is privileged; see :func:`src_back.utils.admin_required`.
-    New accounts receive :attr:`user` and are promoted out of band.
+    New accounts receive :attr:`user`; an admin promotes them through
+    ``PUT /api/v1/users/<id>``.
     """
 
     admin = 'admin'
@@ -46,7 +47,10 @@ class User(UserMixin, BaseMixin, Base):
     same migration works on PostgreSQL and SQLite. Every email assigned to an
     account is stored through :func:`normalize_email`, however the account is
     created or edited. ``password_hash`` is ``None`` for an account a sign-in
-    provider created, which has no password.
+    provider created, which has no password. ``is_active`` replaces Flask-Login's
+    ``UserMixin.is_active``: a deactivated account keeps the rows that reference it
+    but cannot sign in, and :func:`src_back.app.load_user` ends its session on its
+    next request.
     """
 
     __tablename__ = 'users'
@@ -55,6 +59,9 @@ class User(UserMixin, BaseMixin, Base):
     password_hash: Mapped[str | None] = mapped_column(String(255))
     role: Mapped[Role] = mapped_column(
         Enum(Role, name='role', native_enum=False), default=Role.user
+    )
+    is_active: Mapped[bool] = (  # pyright: ignore[reportIncompatibleMethodOverride]
+        mapped_column(Boolean, default=True, server_default=true())
     )
 
     @validates('email')

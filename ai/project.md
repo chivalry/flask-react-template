@@ -14,23 +14,29 @@ that every contributor and agent follows.
     - `schemas/` - Marshmallow schemas; `schemas/base.py` holds `BaseSchema` and
       `validate_ids_exist()`
     - `services/` - business logic by domain; `services/base.py` holds the generic
-      `CRUDService`, `ChildRecordService`, and `require_unique_name()`, and
-      `services/errors.py` the exceptions services raise
+      `CRUDService`, `ChildRecordService`, and `require_unique_name()`,
+      `services/errors.py` the exceptions services raise, and `services/users.py` the
+      admin's account management
     - `tests/` - pytest; one `test_<module>.py` per module; `helpers.py` holds
       `persist()`
     - `app.py` - application factory, error handlers, SPA and upload serving
     - `auth.py` - `current_user` typed as `User`, for routes behind `@login_required`
     - `extensions.py` - shared Flask extensions and the declarative `Base`
+    - `seed.py` - the seed every container start runs; it creates the first admin
     - `utils.py` - error envelopes, pagination in memory and in SQL, query-string
       parsing, quote folding, upload validation
 - Frontend: `src_front/src/` - React/TypeScript with Vite
-    - `api/` - axios client and typed API modules
-    - `components/` - React components; `components/layout/AppShell.tsx` is the shell
-    - `hooks/` - shared hooks
+    - `api/` - axios client, the `resource()` factory, and typed API modules
+    - `components/` - React components; `components/layout/AppShell.tsx` is the shell,
+      `components/common/` holds the form and record-list kit, and
+      `components/admin/` the admin screens
+    - `hooks/` - shared hooks, including the TanStack Query hooks for each resource
     - `pages/` - top-level page components
+    - `schemas/` - Zod form schemas, their defaults, and their payload mappers
     - `store/` - Zustand stores
     - `types/` - TypeScript types shared across modules
-    - `test/` - Vitest tests mirroring `src/`
+    - `utils/` - framework-free helpers, such as local-day dates
+    - `test/` - Vitest tests mirroring `src/`; `test/utils/` holds the shared helpers
 - `ai/` - these instructions; `AGENTS.md` and `.claude/CLAUDE.md` point here
 - `docker/` - Dockerfiles, entrypoint, nginx config, production Compose override
 - `migrations/` - Alembic migrations
@@ -97,7 +103,10 @@ runtime packages and is the file `docker/backend.Dockerfile` installs.
 and `PUBLIC_BASE_URL` with them, when a port is busy; `scripts/worktree-setup.sh` shifts
 them per worktree. Outside `FLASK_ENV=development`, the app refuses to start with a
 placeholder `SECRET_KEY`, and without `PUBLIC_BASE_URL` it starts with OAuth sign-in
-and passkeys disabled.
+and passkeys disabled. The seed creates the first admin from `ADMIN_EMAIL` and
+`ADMIN_PASSWORD` when both are set and no account has that email, and never changes an
+existing account; `scripts/provision.sh` generates `ADMIN_PASSWORD` and leaves
+`ADMIN_EMAIL` blank to fill in before the first deploy.
 
 `src_back/app.py` calls `load_dotenv()` at import, so `.env` values are visible to pytest
 too. A test that depends on an environment variable sets or clears it with

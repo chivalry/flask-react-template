@@ -9,7 +9,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from src_back.extensions import db
 from src_back.models import Role, User
 from src_back.models.user import normalize_email
-from src_back.services.errors import DuplicateRecordError
+from src_back.services.errors import DuplicateRecordError, InactiveAccountError
 
 # Checked in place of a stored hash when there is none, so an unknown email and an
 # account without a password cost the same hash computation as a wrong password. It
@@ -34,8 +34,8 @@ def register_user(email: str, password: str) -> User:
     """Create a new account and commit it.
 
     The duplicate check ignores letter case, and the model stores the email
-    normalized. New accounts always receive the unprivileged ``user`` role; admins
-    are promoted out of band rather than at registration.
+    normalized. New accounts always receive the unprivileged ``user`` role; an admin
+    promotes them on the Users screen.
 
     Args:
         email: The address to register, in any case. Must not already be in use.
@@ -82,13 +82,22 @@ def complete_login(user: User) -> None:
     """Start the session of a user whose identity has been verified.
 
     Every sign-in ends here, whatever proved the identity: registration and password
-    login now, a provider callback or a passkey later. The session is permanent, so
-    its cookie carries an expiry ``SESSION_LIFETIME_DAYS`` out and every later
-    response pushes it forward.
+    login now, a provider callback or a passkey later. Each of them therefore inherits
+    the refusal of a deactivated account. Without it, Flask-Login's ``login_user``
+    would return ``False`` without signing anyone in, and the route would still
+    answer 200. Callers verify the credential first, so the refusal reaches only
+    someone who proved they own the account and never tells a stranger an address is
+    registered. The session is permanent, so its cookie carries an expiry
+    ``SESSION_LIFETIME_DAYS`` out and every later response pushes it forward.
 
     Args:
         user: The account to sign in.
+
+    Raises:
+        InactiveAccountError: If the account has been deactivated.
     """
+    if not user.is_active:
+        raise InactiveAccountError('Account is inactive.')
     login_user(user)
     session.permanent = True
 

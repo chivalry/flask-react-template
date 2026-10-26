@@ -2,22 +2,13 @@ import { AxiosError, AxiosHeaders } from 'axios'
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { logout, me } from '../api/auth'
-import client from '../api/client'
-import { useAuthStore } from '../store/auth'
-import type { AuthUser } from '../types/auth'
+import { logout, me } from '../../api/auth'
+import client from '../../api/client'
+import { useAuthStore } from '../../store/auth'
+import type { AuthUser } from '../../types/auth'
+import { adminUser } from '../utils/fixtures'
 
-vi.mock('../api/auth')
-
-const testUser: AuthUser = {
-    id: 1,
-    uuid: 'user-uuid-1',
-    email: 'tester@example.com',
-    role: 'admin',
-    has_password: true,
-    created_at: '2026-08-01T00:00:00Z',
-    updated_at: '2026-08-01T00:00:00Z',
-}
+vi.mock('../../api/auth')
 
 // An adapter standing in for the network: every request is refused with 401.
 const refuseWith401: AxiosAdapter = async (config: InternalAxiosRequestConfig) => {
@@ -46,13 +37,13 @@ describe('useAuthStore', () => {
     })
 
     it('setUser stores the user', () => {
-        useAuthStore.getState().setUser(testUser)
+        useAuthStore.getState().setUser(adminUser)
 
-        expect(useAuthStore.getState().user).toEqual(testUser)
+        expect(useAuthStore.getState().user).toEqual(adminUser)
     })
 
     it('clearUser resets the user to null', () => {
-        useAuthStore.getState().setUser(testUser)
+        useAuthStore.getState().setUser(adminUser)
 
         useAuthStore.getState().clearUser()
 
@@ -62,19 +53,21 @@ describe('useAuthStore', () => {
     describe('fetchMe', () => {
         it('stores the user and lowers the loading flag on success', async () => {
             useAuthStore.setState({ isLoading: true })
-            vi.mocked(me).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
+            vi.mocked(me).mockResolvedValue({
+                data: adminUser,
+            } as AxiosResponse<AuthUser>)
 
             await useAuthStore.getState().fetchMe()
 
             expect(me).toHaveBeenCalledTimes(1)
             expect(useAuthStore.getState()).toMatchObject({
-                user: testUser,
+                user: adminUser,
                 isLoading: false,
             })
         })
 
         it('clears the user when the server answers 401', async () => {
-            useAuthStore.setState({ user: testUser, isLoading: true })
+            useAuthStore.setState({ user: adminUser, isLoading: true })
             const unauthorized = new AxiosError('Unauthorized', 'ERR_BAD_REQUEST')
             unauthorized.response = { status: 401 } as AxiosResponse
             vi.mocked(me).mockRejectedValue(unauthorized)
@@ -89,7 +82,7 @@ describe('useAuthStore', () => {
         })
 
         it('keeps the user and flags the check when the request fails without a 401', async () => {
-            useAuthStore.setState({ user: testUser, isLoading: true })
+            useAuthStore.setState({ user: adminUser, isLoading: true })
             vi.mocked(me).mockRejectedValue(
                 new AxiosError('Network Error', 'ERR_NETWORK'),
             )
@@ -97,7 +90,7 @@ describe('useAuthStore', () => {
             await useAuthStore.getState().fetchMe()
 
             expect(useAuthStore.getState()).toMatchObject({
-                user: testUser,
+                user: adminUser,
                 isLoading: false,
                 sessionCheckFailed: true,
             })
@@ -118,12 +111,14 @@ describe('useAuthStore', () => {
 
         it('clears the failed-check flag when a retry succeeds', async () => {
             useAuthStore.setState({ sessionCheckFailed: true })
-            vi.mocked(me).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
+            vi.mocked(me).mockResolvedValue({
+                data: adminUser,
+            } as AxiosResponse<AuthUser>)
 
             await useAuthStore.getState().fetchMe()
 
             expect(useAuthStore.getState()).toMatchObject({
-                user: testUser,
+                user: adminUser,
                 sessionCheckFailed: false,
             })
         })
@@ -138,18 +133,18 @@ describe('useAuthStore', () => {
             )
             const pending = useAuthStore.getState().fetchMe()
 
-            useAuthStore.getState().setUser(testUser)
+            useAuthStore.getState().setUser(adminUser)
             rejectMe(new Error('Unauthorized'))
             await pending
 
             expect(useAuthStore.getState()).toMatchObject({
-                user: testUser,
+                user: adminUser,
                 isLoading: false,
             })
         })
 
         it('lets only the latest of two overlapping calls update the store', async () => {
-            const otherUser = { ...testUser, id: 2, email: 'other@example.com' }
+            const otherUser = { ...adminUser, id: 2, email: 'other@example.com' }
             let resolveFirst: (response: AxiosResponse<AuthUser>) => void = () =>
                 undefined
             vi.mocked(me)
@@ -162,7 +157,7 @@ describe('useAuthStore', () => {
             const first = useAuthStore.getState().fetchMe()
             await useAuthStore.getState().fetchMe()
 
-            resolveFirst({ data: testUser } as AxiosResponse<AuthUser>)
+            resolveFirst({ data: adminUser } as AxiosResponse<AuthUser>)
             await first
 
             expect(useAuthStore.getState().user).toEqual(otherUser)
@@ -171,7 +166,7 @@ describe('useAuthStore', () => {
 
     describe('logout', () => {
         it('calls the API and clears the user', async () => {
-            useAuthStore.setState({ user: testUser })
+            useAuthStore.setState({ user: adminUser })
             vi.mocked(logout).mockResolvedValue({
                 data: { message: 'Logged out' },
             } as AxiosResponse<{ message: string }>)
@@ -183,7 +178,7 @@ describe('useAuthStore', () => {
         })
 
         it('clears the user and resolves even when the request fails', async () => {
-            useAuthStore.setState({ user: testUser })
+            useAuthStore.setState({ user: adminUser })
             vi.mocked(logout).mockRejectedValue(new Error('logout request failed'))
 
             await expect(useAuthStore.getState().logout()).resolves.toBeUndefined()
@@ -194,7 +189,7 @@ describe('useAuthStore', () => {
 
     describe('lost-session handler', () => {
         it('drops the user when a request outside the auth endpoints gets a 401', async () => {
-            useAuthStore.setState({ user: testUser, isLoading: true })
+            useAuthStore.setState({ user: adminUser, isLoading: true })
 
             await expect(
                 client.get('/v1/things', { adapter: refuseWith401 }),

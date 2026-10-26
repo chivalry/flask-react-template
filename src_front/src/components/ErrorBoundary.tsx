@@ -1,4 +1,4 @@
-/** @file Top-level error boundary wrapping the whole application tree. */
+/** @file Error boundary around the application tree and around each routed page. */
 
 import { Alert, Button, Box } from '@mui/material'
 import { Component, ErrorInfo, ReactNode } from 'react'
@@ -6,6 +6,8 @@ import { Component, ErrorInfo, ReactNode } from 'react'
 /** Props accepted by {@link ErrorBoundary}. */
 interface Props {
     children: ReactNode
+    /** Clears a caught error when it changes, such as the routed page's pathname. */
+    resetKey?: string
 }
 
 /** Internal state of {@link ErrorBoundary}. */
@@ -41,6 +43,18 @@ export default class ErrorBoundary extends Component<Props, State> {
     componentDidCatch(error: Error, info: ErrorInfo) {
         // eslint-disable-next-line no-console
         console.error('Uncaught error:', error, info)
+    }
+
+    /**
+     * Leave the error state when the reset key changes after an error was shown.
+     *
+     * @param prevProps - The props of the previous render.
+     * @param prevState - The state of the previous render.
+     */
+    componentDidUpdate(prevProps: Props, prevState: State) {
+        if (prevState.hasError && prevProps.resetKey !== this.props.resetKey) {
+            this.setState({ hasError: false })
+        }
     }
 
     /**

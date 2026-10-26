@@ -8,7 +8,7 @@ import client, {
     fetchPage,
     setUnauthorizedHandler,
     surfaceApiError,
-} from '../api/client'
+} from '../../api/client'
 
 // Replace the network with an adapter that answers every request the same way.
 // Statuses of 400 and up reject with an AxiosError, as the real adapters do, so

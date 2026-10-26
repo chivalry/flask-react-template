@@ -8,6 +8,7 @@ const VENDOR_CHUNKS: Record<string, string> = {
     'react-router': 'react',
     'react-router-dom': 'react',
     scheduler: 'react',
+    '@tanstack': 'react',
     '@emotion': 'mui',
     '@mui': 'mui',
     'react-transition-group': 'mui',
@@ -83,6 +84,7 @@ export default defineConfig(({ mode }) => {
             globals: true,
             environment: 'jsdom',
             setupFiles: './src/test/setup.ts',
+            globalSetup: './src/test/globalSetup.ts',
             coverage: {
                 provider: 'v8',
                 reporter: ['text', 'lcov'],

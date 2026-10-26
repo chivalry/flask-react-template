@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MockInstance } from 'vitest'
 
-import ErrorBoundary from '../components/ErrorBoundary'
+import ErrorBoundary from '../../components/ErrorBoundary'
 
 let shouldThrow = false
 let consoleErrorSpy: MockInstance<typeof console.error>
@@ -20,6 +20,16 @@ function ControllableChild() {
     }
     return <div>Child content</div>
 }
+
+const boundaryWithKey = (resetKey: string) => (
+    <ErrorBoundary resetKey={resetKey}>
+        <ControllableChild />
+    </ErrorBoundary>
+)
+
+// componentDidCatch logs once for every error the boundary commits.
+const caughtErrorLogCount = () =>
+    consoleErrorSpy.mock.calls.filter((call) => call[0] === 'Uncaught error:').length
 
 describe('ErrorBoundary', () => {
     beforeEach(() => {
@@ -79,5 +89,39 @@ describe('ErrorBoundary', () => {
 
         expect(screen.getByText('Child content')).toBeInTheDocument()
         expect(screen.queryByText('Something went wrong.')).not.toBeInTheDocument()
+    })
+
+    it('keeps the fallback when it re-renders with the same reset key', () => {
+        shouldThrow = true
+        const { rerender } = render(boundaryWithKey('/a'))
+        shouldThrow = false
+
+        rerender(boundaryWithKey('/a'))
+
+        expect(screen.getByText('Something went wrong.')).toBeInTheDocument()
+        expect(screen.queryByText('Child content')).not.toBeInTheDocument()
+    })
+
+    it('renders the children again when the reset key changes after an error', () => {
+        shouldThrow = true
+        const { rerender } = render(boundaryWithKey('/a'))
+        expect(screen.getByText('Something went wrong.')).toBeInTheDocument()
+        shouldThrow = false
+
+        rerender(boundaryWithKey('/b'))
+
+        expect(screen.getByText('Child content')).toBeInTheDocument()
+        expect(screen.queryByText('Something went wrong.')).not.toBeInTheDocument()
+    })
+
+    it('shows the fallback once when the key changes in an update that throws', () => {
+        const { rerender } = render(boundaryWithKey('/a'))
+        expect(screen.getByText('Child content')).toBeInTheDocument()
+        shouldThrow = true
+
+        rerender(boundaryWithKey('/b'))
+
+        expect(screen.getByText('Something went wrong.')).toBeInTheDocument()
+        expect(caughtErrorLogCount()).toBe(1)
     })
 })

@@ -4,10 +4,16 @@ from flask import Blueprint, Response, jsonify, session
 from flask_login import login_required, logout_user
 
 from src_back.auth import current_user
-from src_back.schemas.user import login_schema, user_schema
+from src_back.schemas.user import login_schema, registration_schema, user_schema
 from src_back.services.auth import authenticate_user, complete_login, register_user
-from src_back.services.errors import DuplicateRecordError
-from src_back.utils import ErrorResponse, conflict, parse_request_json, unauthorized
+from src_back.services.errors import DuplicateRecordError, InactiveAccountError
+from src_back.utils import (
+    ErrorResponse,
+    conflict,
+    forbidden,
+    parse_request_json,
+    unauthorized,
+)
 
 bp = Blueprint('auth', __name__)
 
@@ -17,7 +23,9 @@ def register() -> tuple[Response, int]:
     """Create an account and sign the new user in immediately.
 
     A payload that fails validation never reaches this body: ``parse_request_json``
-    raises and the application answers with a 422 envelope.
+    raises and the application answers with a 422 envelope. The registration schema
+    takes only an email and a password, so a ``role`` or ``is_active`` in the body
+    answers 422 as well.
 
     The new user is signed in through :func:`~src_back.services.auth.complete_login`,
     as in :func:`login`, so the session survives a browser restart.
@@ -26,7 +34,7 @@ def register() -> tuple[Response, int]:
         The serialized user with status 201, or a 409 envelope when the email is
         already registered in any letter case.
     """
-    data = parse_request_json(user_schema)
+    data = parse_request_json(registration_schema)
     try:
         user = register_user(data['email'], data['password'])
     except DuplicateRecordError as exc:
@@ -46,13 +54,18 @@ def login() -> Response | ErrorResponse:
     Returns:
         The serialized user on success, or a 401 envelope when the credentials
         do not match. The message does not distinguish an unknown email, an
-        account without a password, and a wrong password.
+        account without a password, and a wrong password. A deactivated account
+        gets a 403 envelope, but only after its password matched, so the 403
+        never tells a stranger that an address is registered.
     """
     data = parse_request_json(login_schema)
     user = authenticate_user(data['email'], data['password'])
     if not user:
         return unauthorized('Invalid email or password.')
-    complete_login(user)
+    try:
+        complete_login(user)
+    except InactiveAccountError as exc:
+        return forbidden(str(exc))
     return jsonify(user_schema.dump(user))
 
 

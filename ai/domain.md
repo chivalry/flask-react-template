@@ -11,6 +11,11 @@ to put new behavior in the right service.
   `src_back/services/auth.py`; `ai/auth.md` covers sign-in in depth. An account a
   sign-in provider creates has no password (`password_hash` is `NULL`), which
   `User.has_password` and the `has_password` field of the user payload report.
+  Admins manage accounts through `/api/v1/users` (`src_back/api/users.py` and
+  `src_back/services/users.py`) and the Users tab of the admin screen: they create
+  accounts with any role and change an account's email, password, role, and active
+  state. Nothing deletes an account; deactivating one (`User.is_active`) keeps the rows
+  that reference it, and an admin cannot demote or deactivate themself.
 
 ## Test Fixtures
 
@@ -24,6 +29,7 @@ to put new behavior in the right service.
   `adminpass123`
 - `passwordless_user` - a persisted account without a password, as a sign-in provider
   creates one
+- `inactive_user` - a persisted, deactivated account with the password `password123`
 - `auth_client` and `admin_client` - clients signed in as those accounts
 - `Widget` and `WidgetNote` - test-only models exercising the generic services and
   `BaseSchema`

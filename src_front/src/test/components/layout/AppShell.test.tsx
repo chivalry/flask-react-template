@@ -4,22 +4,12 @@ import type { AxiosResponse } from 'axios'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { logout } from '../api/auth'
-import AppShell from '../components/layout/AppShell'
-import { useAuthStore } from '../store/auth'
-import type { AuthUser } from '../types/auth'
+import { logout } from '../../../api/auth'
+import AppShell from '../../../components/layout/AppShell'
+import { useAuthStore } from '../../../store/auth'
+import { adminUser, plainUser } from '../../utils/fixtures'
 
-vi.mock('../api/auth')
-
-const testUser: AuthUser = {
-    id: 1,
-    uuid: 'user-uuid-1',
-    email: 'tester@example.com',
-    role: 'admin',
-    has_password: true,
-    created_at: '2026-08-01T00:00:00Z',
-    updated_at: '2026-08-01T00:00:00Z',
-}
+vi.mock('../../../api/auth')
 
 const renderShell = (initialPath = '/') =>
     render(
@@ -29,10 +19,25 @@ const renderShell = (initialPath = '/') =>
                 <Route element={<AppShell />}>
                     <Route index element={<div>Outlet child content</div>} />
                     <Route path="/other" element={<div>Other page</div>} />
+                    <Route path="/admin/users" element={<div>Users page</div>} />
                 </Route>
             </Routes>
         </MemoryRouter>,
     )
+
+// Sign the admin in, log out from the shell, and check that the session ends on the
+// login page; each logout test sets up the request's outcome first.
+const logOutAndExpectLoginPage = async () => {
+    const user = userEvent.setup()
+    useAuthStore.getState().setUser(adminUser)
+    renderShell()
+
+    await user.click(screen.getByRole('button', { name: 'Logout' }))
+
+    expect(await screen.findByText('Login page')).toBeInTheDocument()
+    expect(logout).toHaveBeenCalledTimes(1)
+    expect(useAuthStore.getState().user).toBeNull()
+}
 
 describe('AppShell', () => {
     beforeEach(() => {
@@ -65,47 +70,82 @@ describe('AppShell', () => {
         )
     })
 
-    it('renders the signed-in user email', () => {
-        useAuthStore.getState().setUser(testUser)
+    it('shows the Admin link to an admin', () => {
+        useAuthStore.getState().setUser(adminUser)
 
         renderShell()
 
-        expect(screen.getByText('tester@example.com')).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute(
+            'href',
+            '/admin',
+        )
+    })
+
+    it('hides the Admin link from a user who is not an admin', () => {
+        useAuthStore.getState().setUser(plainUser)
+
+        renderShell()
+
+        expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument()
+    })
+
+    it('marks Admin current and not Home on a page below /admin', () => {
+        useAuthStore.getState().setUser(adminUser)
+
+        renderShell('/admin/users')
+
+        expect(screen.getByText('Users page')).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute(
+            'aria-current',
+            'page',
+        )
+        expect(screen.getByRole('link', { name: 'Home' })).not.toHaveAttribute(
+            'aria-current',
+        )
+    })
+
+    it('keeps every button named when its label is hidden', () => {
+        useAuthStore.getState().setUser(adminUser)
+        renderShell()
+
+        // Below sm a media query hides the labels; jsdom ignores it, so hide them here.
+        for (const label of ['Home', 'Admin', 'Logout']) {
+            screen.getByText(label).style.display = 'none'
+        }
+
+        expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'Admin' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Logout' })).toBeInTheDocument()
+    })
+
+    it('renders the signed-in user email', () => {
+        useAuthStore.getState().setUser(adminUser)
+
+        renderShell()
+
+        expect(screen.getByText(adminUser.email)).toBeInTheDocument()
     })
 
     it('renders no email when nobody is signed in', () => {
         renderShell()
 
-        expect(screen.queryByText('tester@example.com')).not.toBeInTheDocument()
+        expect(screen.queryByText(adminUser.email)).not.toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Logout' })).toBeInTheDocument()
     })
 
     it('calls logout, clears the user, and navigates to /login on success', async () => {
-        const user = userEvent.setup()
-        useAuthStore.getState().setUser(testUser)
         vi.mocked(logout).mockResolvedValue({
             data: { message: 'Logged out' },
         } as AxiosResponse<{ message: string }>)
-        renderShell()
 
-        await user.click(screen.getByRole('button', { name: 'Logout' }))
-
-        expect(await screen.findByText('Login page')).toBeInTheDocument()
-        expect(logout).toHaveBeenCalledTimes(1)
-        expect(useAuthStore.getState().user).toBeNull()
+        await logOutAndExpectLoginPage()
     })
 
     it('still clears the user and navigates to /login when logout fails', async () => {
-        const user = userEvent.setup()
-        useAuthStore.getState().setUser(testUser)
         vi.mocked(logout).mockRejectedValue(new Error('logout request failed'))
-        renderShell()
 
-        await user.click(screen.getByRole('button', { name: 'Logout' }))
-
-        expect(await screen.findByText('Login page')).toBeInTheDocument()
-        expect(logout).toHaveBeenCalledTimes(1)
-        expect(useAuthStore.getState().user).toBeNull()
+        await logOutAndExpectLoginPage()
     })
 
     it('renders route children through the Outlet inside the main region', () => {

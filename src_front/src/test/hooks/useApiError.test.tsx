@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react'
 import { AxiosError } from 'axios'
 import { describe, expect, it } from 'vitest'
 
-import { useApiError } from '../hooks/useApiError'
+import { useApiError } from '../../hooks/useApiError'
 
 describe('useApiError', () => {
     it('starts with no error', () => {

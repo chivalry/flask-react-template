@@ -11,6 +11,8 @@ export interface AuthUser {
     role: Role
     /** False for an account a sign-in provider created without a password. */
     has_password: boolean
+    /** False once an admin deactivates the account. */
+    is_active: boolean
     created_at: string
     updated_at: string
 }

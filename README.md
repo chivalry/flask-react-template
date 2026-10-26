@@ -11,7 +11,8 @@ production, and scripts to provision and deploy a single server.
 | -------- | ------------------------------------------------------------ |
 | Backend  | Flask, SQLAlchemy 2, Flask-Migrate, Flask-Login, marshmallow |
 | Database | PostgreSQL 16                                                |
-| Frontend | React 19, TypeScript 6, Vite, MUI, Axios, Zustand, Zod       |
+| Frontend | React 19, TypeScript 6, Vite, MUI, Axios, TanStack Query,    |
+|          | Zustand, Zod                                                 |
 | Tooling  | Ruff, basedpyright, pydoclint, pytest, ESLint, Prettier,     |
 |          | Vitest, fallow, Husky, markdownlint                          |
 
@@ -32,7 +33,7 @@ placeholders:
 - the `<title>` in `src_front/index.html`
 - the app bar title in `src_front/src/components/layout/AppShell.tsx`, and the tests
   that expect it, `src_front/src/test/App.test.tsx` and
-  `src_front/src/test/AppShell.test.tsx`
+  `src_front/src/test/components/layout/AppShell.test.tsx`
 - this README's title and the `my-app` placeholders in its commands
 - the placeholder paragraphs at the top of `ai/project.md` and `ai/domain.md`
 
@@ -46,11 +47,13 @@ git clone <your-repo-url> my-app
 cd my-app
 
 cp .env.example .env             # FLASK_ENV=development is already set
+                                 # set ADMIN_EMAIL and ADMIN_PASSWORD in .env
 
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 docker compose up -d db          # or point DATABASE_URL at your own PostgreSQL
 .venv/bin/flask --app src_back.app db upgrade
+.venv/bin/python -m src_back.seed   # creates the admin from ADMIN_EMAIL/ADMIN_PASSWORD
 .venv/bin/flask --app src_back.app run
 
 npm install                      # in a second terminal
@@ -58,8 +61,9 @@ npm run dev
 ```
 
 Open <http://localhost:5174> (or whatever `FRONTEND_PORT` is set to in `.env`) and
-register an account. Promote it to `admin` in the database when you need the
-admin-only routes.
+sign in as the admin from `.env`. Registration stays open and always creates a plain
+user; the admin changes roles, passwords, and active status on the Users tab of the
+Admin page.
 
 ## Docker
 
@@ -71,7 +75,8 @@ npm run docker:down
 ```
 
 The backend container runs migrations and the seed on every start; a seed that exits
-non-zero stops the container. Uploaded files live in the `uploads_data` volume, so they
+non-zero stops the container. With `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`, the
+first start creates that admin. Uploaded files live in the `uploads_data` volume, so they
 survive rebuilds.
 
 The backend image installs only `requirements.txt`, the runtime packages. The lint,
@@ -158,20 +163,22 @@ project/
 │   ├── extensions.py  # db (SQLAlchemy 2 Base), migrate, login_manager
 │   ├── models/        # Package: base.py has BaseMixin, user.py has Role and User
 │   ├── utils.py       # Error envelopes, pagination, parsing, upload checks
-│   ├── api/           # Blueprints (health, auth)
+│   ├── api/           # Blueprints (health, auth, users)
 │   ├── schemas/       # Marshmallow schemas; base.py has BaseSchema
 │   ├── services/      # Business logic; base.py has the generic CRUD services
-│   ├── seed.py        # Idempotent seed entry point
+│   ├── seed.py        # Idempotent seed; creates the first admin
 │   └── tests/         # pytest suite
 ├── src_front/         # React application
 │   └── src/
-│       ├── api/       # Axios client with interceptors; typed API modules
-│       ├── components/  AppShell, ProtectedRoute, AuthFormLayout, ErrorBoundary
-│       ├── hooks/     # useApiError, useAuthFormState
-│       ├── pages/     # Home, Login, Register
+│       ├── api/       # Axios client, the resource() factory, typed API modules
+│       ├── components/  Shell, route guards, error boundaries, common/, admin/
+│       ├── hooks/     # TanStack Query hooks per resource, shared hooks
+│       ├── pages/     # Home, Login, Register, Admin
+│       ├── schemas/   # Zod form schemas and payload mappers
 │       ├── store/     # Zustand auth store
-│       ├── types/     # AuthUser, PaginatedResponse
-│       └── test/      # Vitest suite
+│       ├── types/     # AuthUser, User, PaginatedResponse
+│       ├── utils/     # Local-day date helpers
+│       └── test/      # Vitest suite mirroring src/; utils/ has shared helpers
 ├── migrations/        # Alembic migrations (initial schema included)
 ├── docker/            # Dockerfiles, entrypoint, nginx, production override
 ├── scripts/           # Ports, worktrees, provisioning, deploy, TLS, backups

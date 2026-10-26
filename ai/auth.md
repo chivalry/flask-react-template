@@ -13,16 +13,46 @@ on this groundwork:
   password. `User.has_password`, and `has_password` in the user payload, say which.
   `authenticate_user` answers such an account, and an unknown email, exactly as it
   answers a wrong password, down to the one password-hash check each costs.
-- `complete_login(user)` is the one place a sign-in starts, and it makes the session
-  permanent.
+- `complete_login(user)` is the one place a sign-in starts. It refuses a deactivated
+  account with `InactiveAccountError`, which every caller answers with 403, and
+  otherwise makes the session permanent. Callers check the credential first, so only
+  someone who proved it learns that the account is deactivated.
 - `count_sign_in_methods(user)` counts the ways an account can sign in. Code that
   removes one raises `LastSignInMethodError` (409) instead of removing the last.
+- Self-registration loads `RegistrationSchema`, which accepts only an email and a
+  password: `role` or `is_active` in the body answers 422, so nobody registers as an
+  admin. A registered account is an active `user`.
 
 An account without a password is trusted to own its email address, because only a
 sign-in provider that verified the address creates one. Any new way to create such an
 account, such as an invitation or a passkey-first sign-up, must verify the address
 first; otherwise linking a provider by email would hand the account to whoever
 created it.
+
+## Deactivated accounts
+
+An admin deactivates an account instead of deleting it. On its next request its session
+ends: `load_user` in `src_back/app.py` loads a deactivated account as nobody, and
+Flask-Login's `UserMixin.is_authenticated` follows `is_active` as well, so
+`@login_required` and `admin_required` answer 401 either way. A fresh login answers 403
+`Account is inactive.` after the password check.
+
+- A new account must be committed, or given `is_active=True`, before `complete_login`:
+  the column default applies only at INSERT, so an unsaved `User` reads `is_active` as
+  `None` and is refused. Code that creates an account and signs it in at once, such as
+  a provider callback (#29), commits first.
+- Reactivating an account revives its old sessions within their lifetime, because
+  Flask-Login keeps the account id in the cookie.
+
+## First admin
+
+The seed (`src_back/seed.py`) creates the first admin from `ADMIN_EMAIL` and
+`ADMIN_PASSWORD` on every backend start. It skips, printing why, when either is blank
+or an account already has that email in any letter case, and it never changes an
+existing account, so changing `ADMIN_PASSWORD` later resets nobody; change a password
+on the Users screen instead. `scripts/provision.sh` writes a random `ADMIN_PASSWORD` and
+a blank `ADMIN_EMAIL` into the server's `.env`; fill in the email before the first
+deploy.
 
 ## Configuration
 
