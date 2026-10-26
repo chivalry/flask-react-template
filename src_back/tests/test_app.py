@@ -156,6 +156,10 @@ def test_load_user_returns_none_for_missing_id(app: Flask) -> None:
     assert load_user('99999') is None
 
 
+def test_load_user_returns_none_for_an_inactive_account(inactive_user: User) -> None:
+    assert load_user(str(inactive_user.id)) is None
+
+
 def test_unauthorized_handler_returns_json_401(app: Flask) -> None:
     with app.test_request_context('/'):
         response, status = unauthorized_handler()

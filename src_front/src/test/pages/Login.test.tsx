@@ -4,22 +4,13 @@ import type { AxiosResponse } from 'axios'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { login } from '../api/auth'
-import Login from '../pages/Login'
-import { useAuthStore } from '../store/auth'
-import type { AuthUser } from '../types/auth'
+import { login } from '../../api/auth'
+import Login from '../../pages/Login'
+import { useAuthStore } from '../../store/auth'
+import type { AuthUser } from '../../types/auth'
+import { adminUser } from '../utils/fixtures'
 
-vi.mock('../api/auth')
-
-const testUser: AuthUser = {
-    id: 1,
-    uuid: 'user-uuid-1',
-    email: 'tester@example.com',
-    role: 'admin',
-    has_password: true,
-    created_at: '2026-08-01T00:00:00Z',
-    updated_at: '2026-08-01T00:00:00Z',
-}
+vi.mock('../../api/auth')
 
 // Shows the full location it landed on, so a test can check the query and hash too.
 const RequestedPage = () => {
@@ -50,7 +41,7 @@ const signInWith = async (
 
 const renderLoginAndSignIn = async (state: unknown) => {
     const user = userEvent.setup()
-    vi.mocked(login).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
+    vi.mocked(login).mockResolvedValue({ data: adminUser } as AxiosResponse<AuthUser>)
     renderLogin(state)
     await signInWith(user, 'user@example.com', 'password123')
 }
@@ -84,14 +75,14 @@ describe('Login', () => {
 
     it('signs in, stores the user, and navigates to / on success', async () => {
         const user = userEvent.setup()
-        vi.mocked(login).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
+        vi.mocked(login).mockResolvedValue({ data: adminUser } as AxiosResponse<AuthUser>)
         renderLogin()
 
         await signInWith(user, 'user@example.com', 'password123')
 
         expect(await screen.findByText('Home page')).toBeInTheDocument()
         expect(login).toHaveBeenCalledWith('user@example.com', 'password123')
-        expect(useAuthStore.getState().user).toEqual(testUser)
+        expect(useAuthStore.getState().user).toEqual(adminUser)
     })
 
     it('returns to the page the guard recorded, with its query and hash', async () => {
@@ -157,7 +148,7 @@ describe('Login', () => {
         const pendingButton = await screen.findByRole('button', { name: 'Signing in…' })
         expect(pendingButton).toBeDisabled()
 
-        resolveLogin({ data: testUser } as AxiosResponse<AuthUser>)
+        resolveLogin({ data: adminUser } as AxiosResponse<AuthUser>)
         expect(await screen.findByText('Home page')).toBeInTheDocument()
     })
 

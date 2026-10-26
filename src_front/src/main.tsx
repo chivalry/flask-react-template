@@ -1,6 +1,7 @@
-/** @file Browser entry point: mounts the app with its theme and error boundary. */
+/** @file Browser entry point: mounts the app with its providers. */
 
 import { CssBaseline, ThemeProvider } from '@mui/material'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
@@ -8,6 +9,8 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
 import { theme } from './theme'
+
+const queryClient = new QueryClient()
 
 const root = document.getElementById('root')
 if (!root) throw new Error('Root element not found')
@@ -17,9 +20,11 @@ createRoot(root).render(
         <ErrorBoundary>
             <ThemeProvider theme={theme}>
                 <CssBaseline />
-                <BrowserRouter>
-                    <App />
-                </BrowserRouter>
+                <QueryClientProvider client={queryClient}>
+                    <BrowserRouter>
+                        <App />
+                    </BrowserRouter>
+                </QueryClientProvider>
             </ThemeProvider>
         </ErrorBoundary>
     </StrictMode>,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isAdmin } from '../types/auth'
+import { isAdmin } from '../../types/auth'
 
 describe('isAdmin', () => {
     it('is true for the admin role', () => {

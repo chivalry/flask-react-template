@@ -1,31 +1,25 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { AxiosError } from 'axios'
 import type { AxiosResponse } from 'axios'
-import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { me } from '../api/auth'
+import { usersApi } from '../api/users'
 import App from '../App'
 import { useAuthStore } from '../store/auth'
 import type { AuthUser } from '../types/auth'
+import { adminUser, plainUser } from './utils/fixtures'
+import Providers from './utils/Providers'
 
 vi.mock('../api/auth')
+vi.mock('../api/users')
 
-const testUser: AuthUser = {
-    id: 1,
-    uuid: 'user-uuid-1',
-    email: 'tester@example.com',
-    role: 'admin',
-    has_password: true,
-    created_at: '2026-08-01T00:00:00Z',
-    updated_at: '2026-08-01T00:00:00Z',
-}
-
+// The app reads the query client from context, so it renders inside the test providers.
 const renderAppAtPath = (path: string) =>
     render(
-        <MemoryRouter initialEntries={[path]}>
+        <Providers route={path}>
             <App />
-        </MemoryRouter>,
+        </Providers>,
     )
 
 // The server answers a missing session with 401; only that status signs the visitor
@@ -35,13 +29,16 @@ const signedOut = () => {
     unauthorized.response = { status: 401 } as AxiosResponse
     vi.mocked(me).mockRejectedValue(unauthorized)
 }
-const signedIn = () =>
-    vi.mocked(me).mockResolvedValue({ data: testUser } as AxiosResponse<AuthUser>)
+const signedIn = (user: AuthUser = adminUser) =>
+    vi.mocked(me).mockResolvedValue({ data: user } as AxiosResponse<AuthUser>)
+
+const findHomeHeading = () => screen.findByRole('heading', { name: 'Hello, World' })
 
 describe('App', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         useAuthStore.setState({ user: null, isLoading: true })
+        vi.mocked(usersApi.list).mockResolvedValue([adminUser, plainUser])
     })
 
     it('asks the server who is signed in on mount', async () => {
@@ -77,16 +74,14 @@ describe('App', () => {
 
         renderAppAtPath('/')
 
-        expect(
-            await screen.findByRole('heading', { name: 'Hello, World' }),
-        ).toBeInTheDocument()
+        expect(await findHomeHeading()).toBeInTheDocument()
         const appBar = screen.getByRole('banner')
         expect(within(appBar).getByText('Flask React Template')).toBeInTheDocument()
         expect(within(appBar).getByRole('link', { name: 'Home' })).toHaveAttribute(
             'href',
             '/',
         )
-        expect(within(appBar).getByText('tester@example.com')).toBeInTheDocument()
+        expect(within(appBar).getByText(adminUser.email)).toBeInTheDocument()
     })
 
     it('redirects unknown paths to /', async () => {
@@ -94,9 +89,32 @@ describe('App', () => {
 
         renderAppAtPath('/nope')
 
-        expect(
-            await screen.findByRole('heading', { name: 'Hello, World' }),
-        ).toBeInTheDocument()
+        expect(await findHomeHeading()).toBeInTheDocument()
+    })
+
+    it('shows the Users tab of the admin section to an admin', async () => {
+        signedIn()
+
+        renderAppAtPath('/admin')
+
+        expect(await screen.findByText(plainUser.email)).toBeInTheDocument()
+        expect(screen.getByRole('tab', { name: 'Users' })).toHaveAttribute(
+            'aria-selected',
+            'true',
+        )
+        expect(screen.getByRole('heading', { name: 'Users' })).toBeInTheDocument()
+        expect(usersApi.list).toHaveBeenCalledTimes(1)
+    })
+
+    it('sends a non-admin from /admin to the home page', async () => {
+        signedIn(plainUser)
+
+        renderAppAtPath('/admin')
+
+        expect(await findHomeHeading()).toBeInTheDocument()
+        expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument()
+        expect(usersApi.list).not.toHaveBeenCalled()
     })
 
     it('renders the login page at /login', async () => {

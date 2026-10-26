@@ -3,19 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import ProtectedRoute from '../components/ProtectedRoute'
-import { useAuthStore } from '../store/auth'
-import type { AuthUser } from '../types/auth'
-
-const testUser: AuthUser = {
-    id: 1,
-    uuid: 'user-uuid-1',
-    email: 'tester@example.com',
-    role: 'admin',
-    has_password: true,
-    created_at: '2026-08-01T00:00:00Z',
-    updated_at: '2026-08-01T00:00:00Z',
-}
+import ProtectedRoute from '../../components/ProtectedRoute'
+import { useAuthStore } from '../../store/auth'
+import { adminUser } from '../utils/fixtures'
 
 // Shows the login page and the location the guard recorded in the redirect's state.
 const LoginStub = () => {
@@ -55,7 +45,7 @@ describe('ProtectedRoute', () => {
     })
 
     it('renders the child route when the auth store has a user', () => {
-        useAuthStore.getState().setUser(testUser)
+        useAuthStore.getState().setUser(adminUser)
 
         renderProtectedRoute()
 
@@ -100,7 +90,7 @@ describe('ProtectedRoute', () => {
     })
 
     it('still renders the child route for a signed-in user after a failed refresh', () => {
-        useAuthStore.setState({ user: testUser, sessionCheckFailed: true })
+        useAuthStore.setState({ user: adminUser, sessionCheckFailed: true })
 
         renderProtectedRoute()
 

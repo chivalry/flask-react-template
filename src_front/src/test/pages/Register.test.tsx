@@ -4,22 +4,13 @@ import type { AxiosResponse } from 'axios'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { register } from '../api/auth'
-import Register from '../pages/Register'
-import { useAuthStore } from '../store/auth'
-import type { AuthUser } from '../types/auth'
+import { register } from '../../api/auth'
+import Register from '../../pages/Register'
+import { useAuthStore } from '../../store/auth'
+import type { AuthUser } from '../../types/auth'
+import { plainUser } from '../utils/fixtures'
 
-vi.mock('../api/auth')
-
-const testUser: AuthUser = {
-    id: 2,
-    uuid: 'user-uuid-2',
-    email: 'new@example.com',
-    role: 'user',
-    has_password: true,
-    created_at: '2026-08-01T00:00:00Z',
-    updated_at: '2026-08-01T00:00:00Z',
-}
+vi.mock('../../api/auth')
 
 const renderRegister = () =>
     render(
@@ -96,20 +87,20 @@ describe('Register', () => {
     it('registers, stores the signed-in user, and navigates to /', async () => {
         const user = userEvent.setup()
         vi.mocked(register).mockResolvedValue({
-            data: testUser,
+            data: plainUser,
         } as AxiosResponse<AuthUser>)
         renderRegister()
 
         await fillRegistrationForm(user, {
-            email: 'new@example.com',
+            email: plainUser.email,
             password: 'password123',
             confirmPassword: 'password123',
         })
         await user.click(screen.getByRole('button', { name: 'Create account' }))
 
         expect(await screen.findByText('Home page')).toBeInTheDocument()
-        expect(register).toHaveBeenCalledWith('new@example.com', 'password123')
-        expect(useAuthStore.getState().user).toEqual(testUser)
+        expect(register).toHaveBeenCalledWith(plainUser.email, 'password123')
+        expect(useAuthStore.getState().user).toEqual(plainUser)
     })
 
     it('shows the server-provided message when registration fails', async () => {

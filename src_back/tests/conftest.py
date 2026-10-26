@@ -94,6 +94,13 @@ def passwordless_user(app: Flask) -> User:
 
 
 @pytest.fixture()
+def inactive_user(app: Flask) -> User:
+    u = User(email='inactive@test.com', role=Role.user, is_active=False)
+    u.set_password('password123')
+    return persist(u)
+
+
+@pytest.fixture()
 def auth_client(client: FlaskClient, user: User) -> FlaskClient:
     client.post(
         '/api/v1/auth/login',

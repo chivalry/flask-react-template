@@ -112,22 +112,29 @@ The `dependencies` in `package.json`: what the browser bundle ships.
   its own chunk.
 - **MUI (`@mui/material`)**: the component library: the app bar, the sign-in and
   registration forms, the alerts, and the theme in `theme.ts`.
-- **`@mui/icons-material`**: MUI's icon set. The app bar's logout icon is its only use
-  so far.
+- **`@mui/icons-material`**: MUI's icon set: the app bar's navigation and logout icons,
+  and the add, edit, and delete buttons of record lists.
 - **Emotion (`@emotion/react`, `@emotion/styled`)**: MUI's styling engine. MUI requires
   both as peer dependencies even though no source file imports them, which is why
   `.fallowrc.json` tells fallow to ignore them.
 - **Axios**: the HTTP client. `api/client.ts` sets `baseURL: '/api'` and
   `withCredentials`, and its interceptors copy the server's error text onto the error
   and tell the auth store about a 401.
+- **TanStack Query (`@tanstack/react-query`)**: server state. `main.tsx` provides one
+  `QueryClient`; each resource's hooks module wraps `useQuery` and
+  `useResourceMutations` (`hooks/resources.ts`), which invalidates the cached lists
+  after a change, and `useSessionQueryCache` clears the cache when the signed-in
+  account changes. `vite.config.ts` puts it in the `react` vendor chunk.
 - **React Router (`react-router-dom`)**: client-side routing. `App.tsx` holds the
   route table, and `ProtectedRoute` sends a signed-out visitor to the login page.
 - **React Hook Form (`react-hook-form`)**: form state and validation for the sign-in
-  and registration forms.
+  and registration forms and for every `FormDialog`, whose `FormTextField`,
+  `FormSelectField`, and `FormSwitchField` bind to it.
 - **`@hookform/resolvers`**: the bridge that lets React Hook Form validate with the
   Zod schemas.
-- **Zod**: the sign-in and registration schemas, which also type the form values, so
-  the frontend checks the backend's rules before a request is sent.
+- **Zod**: the sign-in, registration, and account form schemas (`schemas/`), which also
+  type the form values, so the frontend checks the backend's rules before a request is
+  sent.
 - **Zustand**: the one store, holding the signed-in user and the session check that
   `ProtectedRoute` waits on.
 
@@ -151,8 +158,8 @@ The `devDependencies` in `package.json`.
   runs the build, and a Claude Code hook runs it after every TypeScript edit. The
   `~6.0.0` range keeps it below 6.1, which typescript-eslint does not support yet.
 - **`@types/node`, `@types/react`, `@types/react-dom`**: type declarations for Node,
-  which `vite.config.ts` uses, and for React and react-dom, which ship none of their
-  own.
+  which `vite.config.ts` and `test/globalSetup.ts` use, and for React and react-dom,
+  which ship none of their own.
 - **Vitest**: the frontend test runner, configured in the `test` block of
   `vite.config.ts` so it shares Vite's resolution and plugins.
 - **`@vitest/coverage-v8`**: the coverage provider, with 100% thresholds over every

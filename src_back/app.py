@@ -48,13 +48,19 @@ _JSON_ERROR_MESSAGES = {
 def load_user(user_id: str) -> User | None:
     """Reload the signed-in user from the id stored in the session cookie.
 
+    A deactivated account loads as nobody, so its session ends on its next request.
+
     Args:
         user_id: The user's primary key, as a string from the session.
 
     Returns:
-        The matching user, or ``None`` if the account no longer exists.
+        The matching user, or ``None`` if the account no longer exists or has been
+        deactivated.
     """
-    return db.session.get(User, int(user_id))
+    user = db.session.get(User, int(user_id))
+    if user is None or not user.is_active:
+        return None
+    return user
 
 
 @login_manager.unauthorized_handler
@@ -214,10 +220,11 @@ def _register_blueprints(app: Flask) -> None:
     Args:
         app: The application being configured.
     """
-    from src_back.api import auth_bp, health_bp
+    from src_back.api import auth_bp, health_bp, users_bp
 
     app.register_blueprint(health_bp, url_prefix='/api')
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
+    app.register_blueprint(users_bp, url_prefix='/api/v1/users')
 
 
 def _build_json_error_handler(

@@ -33,6 +33,11 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `services/base.py` in `create` and `update`. It compares names with straight and
   curly quotes treated alike but case still counting, and raises `DuplicateRecordError`
   from `services/errors.py`, which the handler answers with `conflict(str(exc))`.
+- Services raise the exceptions in `services/errors.py`, and the handler catches each
+  one and answers with its envelope from `utils.py`: `DuplicateRecordError`,
+  `RecordInUseError`, `ProtectedRecordError`, and `LastSignInMethodError` with
+  `conflict(str(exc))` (409), `SelfModificationError` with `bad_request(str(exc))`
+  (400), and `InactiveAccountError` with `forbidden(str(exc))` (403).
 - A service removes a stored file only after the commit that stops referencing it,
   through `delete_upload()` in `utils.py`, which ignores a file that is already gone:
   in `after_delete` for a deleted record, and after its own commit when an update
@@ -42,7 +47,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   Auto schemas omit foreign-key columns; a child schema that accepts the parent id
   in the body sets `include_fk = True`. A schema that accepts a list of ids checks it
   in a `@validates` method with `validate_ids_exist(model, ids, label)`, one `COUNT`
-  query, so an unknown id fails with a 422.
+  query, so an unknown id fails with a 422. A schema that trims strings does it in a
+  `@pre_load` hook, not `@post_load`: the `Length` validators generated from the
+  columns run on the raw value, so a post-load trim still rejects a padded value of
+  the maximum length.
 - Auth is a Flask-Login session cookie. Every sign-in ends in `complete_login(user)`
   from `services/auth.py`, the only `login_user` call, so a new way to sign in (an
   OAuth callback, a passkey check) calls it too. It marks the session permanent, so
@@ -53,6 +61,13 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   Routes behind `@login_required` import `current_user` from `src_back/auth.py`, where
   it is typed as `User`; code that checks `is_authenticated` itself, such as
   `admin_required`, keeps Flask-Login's.
+- Accounts are deactivated, never deleted, so the rows that reference them stay
+  intact. `complete_login` refuses a deactivated account with `InactiveAccountError`,
+  and every caller checks the credential first, so the 403 never tells a stranger that
+  an address is registered. A deactivated account's session ends on its next request:
+  `load_user` in `app.py` loads it as nobody, and Flask-Login's `is_authenticated`
+  follows `is_active` as well. An admin cannot demote or deactivate themself
+  (`SelfModificationError`), so an active admin always remains.
 - `User` stores every email through `normalize_email()` in `models/user.py` (trimmed
   and lowercased), however the account is created or edited, and lookups go through
   `find_user_by_email()` in `services/auth.py`, so letter case never tells two
@@ -91,24 +106,56 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   auth store on a 401.
 - The Zustand auth store holds the signed-in user. `fetchMe()` runs once on mount and
   `ProtectedRoute` waits for it; login and register store the user from their own
-  response, and a `/me` response that lands after a sign-in or sign-out is discarded
-  as stale. Only a 401 from `/me` ends the session; any other failure keeps the
-  current user and raises `sessionCheckFailed`, which `ProtectedRoute` renders as a
-  retry alert instead of a redirect. Pages render inside `AppShell`.
+  response, as an admin's edit of their own account does from the update's, and a
+  `/me` response that lands after a sign-in or sign-out is discarded as stale. Only a
+  401 from `/me` ends the session; any other failure keeps the current user and raises
+  `sessionCheckFailed`, which `ProtectedRoute` renders as a retry alert instead of a
+  redirect. Pages render inside `AppShell`.
 - Pages load through `React.lazy` in `App.tsx`, so each ships in its own chunk, and
   `AppShell` wraps its `Outlet` in `Suspense` so the app bar stays while a page loads.
-  `vite.config.ts` groups third-party code into the `react`, `mui`, and `forms` vendor
-  chunks; add a large new dependency to one of them in `VENDOR_CHUNKS`.
-- Forms use React Hook Form with Zod schemas; request errors surface through
-  `useApiError`. The 422 envelope carries no field details (`app.py` only logs them),
-  so the Zod schemas enforce every backend validation rule; otherwise the user sees
-  just "Invalid request".
+  `RouteErrorBoundary`, a pathless layout route in `App.tsx`, puts every page inside an
+  error boundary that clears when the path changes, so a failing page, or a page
+  whose chunk fails to load, keeps the app bar. `vite.config.ts` groups third-party
+  code into the `react`, `mui`, and `forms` vendor chunks; add a large new dependency
+  to one of them in `VENDOR_CHUNKS`.
+- Admin pages sit behind `AdminRoute`, inside `ProtectedRoute`, which sends non-admins
+  to `/`. `pages/AdminPage.tsx` builds its tabs and its descendant routes from one
+  `SECTIONS` array, so a new admin screen is one more entry there.
+- Server state goes through TanStack Query. `main.tsx` provides one `QueryClient`.
+  Each resource gets an API module built with `resource()` from `api/resources.ts` and
+  a hooks module, such as `hooks/users.ts`, with a `useQuery` for its list and
+  `useResourceMutations()` from `hooks/resources.ts`, which invalidates the resource's
+  key, and any `alsoInvalidate` keys, after a change and hands each record an update
+  saves to `onUpdated`, which the users hooks use to keep the auth store current. A
+  record's detail query is keyed `[...listKey, id]`; a delete removes it with
+  `removeQueries` before invalidating the list, because the list's prefix invalidation
+  would otherwise refetch the deleted record and show it from cache through the
+  retries. `useSessionQueryCache()` in `App.tsx` clears the cache whenever the
+  signed-in account changes, so one account never sees another's data.
+- Forms use React Hook Form with Zod schemas; a form in a dialog is a `FormDialog` whose
+  fields are `FormTextField`, `FormSelectField`, and `FormSwitchField` from
+  `components/common/`. Request errors surface through `useApiError`, which
+  `FormDialog` shows above the fields. The 422 envelope carries no field details
+  (`app.py` only logs them), so the Zod schemas enforce every backend validation rule;
+  otherwise the user sees just "Invalid request".
+- A list of records with create, edit, and delete dialogs is a `RecordSection`, given
+  the resource's mutations and a `renderDialog` for its form dialog; without
+  `mutations.remove`, no row offers Delete. The section closes whichever dialog is open
+  when a save or delete settles, so `FormDialog` and `ConfirmDialog` cannot be
+  dismissed while their request runs, and a dialog built another way must hold itself
+  open the same way. `QueryState` renders a query's spinner, error, or data.
 - Component files export only components: `react-refresh/only-export-components` warns
   on any other export except a primitive constant, and CI fails on warnings, so shared
   constants and helpers live in `.ts` modules.
 - Every file starts with a `@file` JSDoc block, and every function, interface, and
   type alias has JSDoc without types in its tags. Functions stay under 50 lines.
 - Prettier: single quotes, no semicolons, 4-space indentation, print width 90.
+- Tests mirror `src/` under `src/test/`, so `src/components/common/RecordSection.tsx`
+  is tested in `test/components/common/RecordSection.test.tsx`. Shared helpers live in
+  `test/utils/`: `Providers` and `renderWithProviders` (a query client and a router),
+  `FormHarness`, the dialog queries, and the `adminUser` and `plainUser` fixtures.
+  `test/globalSetup.ts` pins `TZ` to `America/Los_Angeles`, where date-only bugs show,
+  and `test/setup.ts` stubs `IntersectionObserver`, which jsdom lacks.
 
 ## Git
 

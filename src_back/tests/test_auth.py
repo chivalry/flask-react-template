@@ -9,7 +9,7 @@ from werkzeug.security import check_password_hash
 from src_back import auth
 from src_back.api import auth as auth_api
 from src_back.app import SESSION_LIFETIME_DAYS
-from src_back.models import User
+from src_back.models import Role, User
 from src_back.models import user as user_model
 from src_back.services import auth as auth_service
 from src_back.services.auth import (
@@ -17,6 +17,7 @@ from src_back.services.auth import (
     count_sign_in_methods,
     find_user_by_email,
 )
+from src_back.services.errors import InactiveAccountError
 
 SESSION_LIFETIME = timedelta(days=SESSION_LIFETIME_DAYS)
 
@@ -44,6 +45,19 @@ def test_register_success(client: FlaskClient) -> None:
     assert 'password' not in data
     assert 'password_hash' not in data
     assert 'id' in data
+
+
+def test_register_creates_an_active_user(client: FlaskClient) -> None:
+    r = client.post(
+        '/api/v1/auth/register',
+        json={'email': 'new@example.com', 'password': 'secure123'},
+    )
+    assert r.status_code == 201
+    assert r.get_json()['is_active'] is True
+    account = find_user_by_email('new@example.com')
+    assert account is not None
+    assert account.role is Role.user
+    assert account.is_active is True
 
 
 def test_register_cookie_expires_one_session_lifetime_out(client: FlaskClient) -> None:
@@ -103,12 +117,16 @@ def test_register_invalid_email_is_unprocessable(client: FlaskClient) -> None:
     assert r.status_code == 422
 
 
-def test_register_cannot_choose_a_role(client: FlaskClient) -> None:
+@pytest.mark.parametrize(('field', 'value'), [('role', 'admin'), ('is_active', False)])
+def test_register_cannot_choose_a_role_or_active_state(
+    client: FlaskClient, field: str, value: object
+) -> None:
     r = client.post(
         '/api/v1/auth/register',
-        json={'email': 'x@example.com', 'password': 'secure123', 'role': 'admin'},
+        json={'email': 'x@example.com', 'password': 'secure123', field: value},
     )
     assert r.status_code == 422
+    assert find_user_by_email('x@example.com') is None
 
 
 def test_register_without_body_is_unprocessable(client: FlaskClient) -> None:
@@ -183,15 +201,32 @@ def test_login_ignores_the_case_of_the_email(client: FlaskClient, user: User) ->
     assert r.status_code == 200
 
 
-@pytest.mark.usefixtures('user', 'passwordless_user')
+def test_login_refuses_an_inactive_account_with_the_right_password(
+    client: FlaskClient, inactive_user: User
+) -> None:
+    r = client.post(
+        '/api/v1/auth/login',
+        json={'email': inactive_user.email, 'password': 'password123'},
+    )
+    assert r.status_code == 403
+    assert r.get_json() == {'error': 'Account is inactive.'}
+    assert client.get_cookie('session') is None
+    # The test app context is shared across client requests, so drop flask_login's
+    # cached g._login_user to make /me read the session cookie, which was never set.
+    g.pop('_login_user', None)
+    assert client.get('/api/v1/auth/me').status_code == 401
+
+
+@pytest.mark.usefixtures('user', 'passwordless_user', 'inactive_user')
 @pytest.mark.parametrize(
     ('email', 'password'),
     [
         ('nobody@test.com', 'password123'),
         ('nopass@test.com', 'password123'),
         ('user@test.com', 'wrongpassword'),
+        ('inactive@test.com', 'wrongpassword'),
     ],
-    ids=['unknown-email', 'no-password', 'wrong-password'],
+    ids=['unknown-email', 'no-password', 'wrong-password', 'inactive-wrong-password'],
 )
 def test_every_failed_login_checks_one_hash_and_answers_alike(
     client: FlaskClient, monkeypatch: pytest.MonkeyPatch, email: str, password: str
@@ -247,6 +282,15 @@ def test_complete_login_starts_a_permanent_session(app: Flask, user: User) -> No
         complete_login(user)
         assert session.permanent is True
         assert flask_login.current_user == user
+
+
+def test_complete_login_refuses_an_inactive_account(
+    app: Flask, inactive_user: User
+) -> None:
+    with app.test_request_context():
+        with pytest.raises(InactiveAccountError, match='Account is inactive.'):
+            complete_login(inactive_user)
+        assert flask_login.current_user.is_anonymous
 
 
 def test_logout_success(auth_client: FlaskClient) -> None:
