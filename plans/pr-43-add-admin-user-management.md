@@ -230,8 +230,11 @@ def _seed_admin() -> None:
     if not email or not password.strip():
         print('Skipping admin seed: ADMIN_EMAIL and ADMIN_PASSWORD are not set.')
         return
+    if db.session.query(User.id).filter_by(role=Role.admin).first() is not None:
+        print('An admin account already exists; skipping admin seed.')
+        return
     if find_user_by_email(email) is not None:
-        print(f'Admin {email} already exists; skipping admin seed.')
+        print(f'Account {email} already exists; skipping admin seed.')
         return
     user = User(email=email, role=Role.admin, is_active=True)
     user.set_password(password)
@@ -243,11 +246,15 @@ def _seed_admin() -> None:
 Module docstring: keep the entrypoint and idempotence paragraph; add that every step
 runs in one application context and only flushes, `seed` commits once so a failing
 step leaves the database as it was, and a step that skips prints one line saying why.
-Then say where a project's next steps go: lookup rows through a step that inserts only
-the rows missing by natural key, and development samples through a step that returns
-unless `FLASK_ENV` is `development` and the table is empty, with the data in a
-`seed_data.py` that never touches the database. `_seed_admin`'s docstring: it never
-changes an existing account, so a later `ADMIN_PASSWORD` change resets nobody.
+Then say where a project's next steps go: lookup rows nobody edits through a step that
+inserts only the rows missing by natural key, rows an admin can rename through a step
+that returns unless the table is empty, and development samples through a step that
+returns unless `FLASK_ENV` is `development` and the table is empty, with the data in a
+`seed_data.py` that never touches the database. `_seed_admin`'s docstring: the admin
+check makes the bootstrap run once, since an admin can change their own email on the
+Users screen (added after review: checking the email alone recreated the bootstrap
+admin after a rename), and it never changes or promotes an existing account, so a
+later `ADMIN_PASSWORD` change resets nobody.
 
 ### Configuration
 
@@ -255,9 +262,9 @@ changes an existing account, so a later `ADMIN_PASSWORD` change resets nobody.
 
 ```text
 # --- Seed -----------------------------------------------------------------------
-# src_back/seed.py creates the first admin from these on every backend start. It
-# skips when either is blank or the email already has an account, and never changes
-# an existing account.
+# src_back/seed.py runs on every backend start and creates the first admin from these.
+# It skips when either is blank, an admin already exists, or the email already has an
+# account, and never changes an existing account.
 ADMIN_EMAIL=
 ADMIN_PASSWORD=
 ```

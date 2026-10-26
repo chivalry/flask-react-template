@@ -6,6 +6,7 @@ import { z } from 'zod'
 import FormDialog from '../../../components/common/FormDialog'
 import type { FormDialogProps } from '../../../components/common/FormDialog'
 import FormTextField from '../../../components/common/FormTextField'
+import { pressEscapeInDialog } from '../../utils/dialogs'
 
 const schema = z.object({
     name: z.string().trim().min(1, 'Enter a name.'),
@@ -106,7 +107,15 @@ describe('FormDialog', () => {
         expect(onClose).toHaveBeenCalledTimes(1)
     })
 
-    it('disables the submit button while onSubmit is pending', async () => {
+    it('calls onClose when Escape is pressed', () => {
+        renderDialog()
+
+        pressEscapeInDialog()
+
+        expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('disables both buttons and ignores Escape while onSubmit is pending', async () => {
         const user = userEvent.setup()
         let resolveSubmit: () => void = () => undefined
         onSubmit.mockReturnValue(
@@ -118,15 +127,21 @@ describe('FormDialog', () => {
 
         await submitName(user, 'Ada')
 
+        expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
         await waitFor(() =>
-            expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled(),
+            expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled(),
         )
+        // The caller closes whichever dialog is open once the save settles, so a
+        // dismissal now would let that close land on the next dialog instead.
+        pressEscapeInDialog()
+        expect(onClose).not.toHaveBeenCalled()
 
         resolveSubmit()
 
         await waitFor(() =>
             expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled(),
         )
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
     })
 
     it('disables the submit button as soon as the dialog starts closing', () => {

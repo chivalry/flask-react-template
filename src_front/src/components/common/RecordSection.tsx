@@ -21,7 +21,14 @@ interface RecordMutations<T, P> {
     remove?: RemoveMutation
 }
 
-/** What a record's form dialog receives from {@link RecordSection}. */
+/**
+ * What a record's form dialog receives from {@link RecordSection}.
+ *
+ * The dialog must not call `onClose`, or let the viewer dismiss it, while
+ * `onSubmit` is pending: the section closes whichever dialog is open when the save
+ * settles, so a dialog opened in the meantime would close instead. `FormDialog`
+ * already holds itself open until its submit settles.
+ */
 export interface RecordDialogProps<T, P> {
     open: boolean
     item: T | null
@@ -82,7 +89,10 @@ function RecordDeleteDialog<T extends { id: number }>(props: RecordDeleteDialogP
         onClose,
     } = props
 
-    /** Delete the selected record, then close the confirmation. */
+    /**
+     * Delete the selected record, then close the confirmation, which cannot be
+     * dismissed until the delete settles.
+     */
     const confirm = async () => {
         // Delete is clickable only while open, and the dialog is open only with an item.
         await remove.mutateAsync(item!.id)
@@ -116,6 +126,10 @@ function useRecordHandlers<T extends { id: number }, P>(
 
     /**
      * Create or update, depending on which dialog is open, then close it.
+     *
+     * The form dialog cannot be dismissed while this runs (see
+     * {@link RecordDialogProps}), so the dialog still open when the save settles is
+     * the one that started it.
      *
      * @param payload - The validated request body.
      */

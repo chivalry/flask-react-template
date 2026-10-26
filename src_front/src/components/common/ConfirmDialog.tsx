@@ -23,6 +23,40 @@ export interface ConfirmDialogProps {
     onConfirm: () => Promise<void>
 }
 
+/** Props accepted by {@link ConfirmDialogButtons}. */
+interface ConfirmDialogButtonsProps {
+    confirmLabel: string
+    confirmDisabled: boolean
+    cancelDisabled: boolean
+    onCancel: () => void
+    onConfirm: () => void
+}
+
+/**
+ * Render the Cancel and confirm buttons.
+ *
+ * @param props - The component props.
+ * @returns The dialog actions element.
+ */
+function ConfirmDialogButtons(props: ConfirmDialogButtonsProps) {
+    const { confirmLabel, confirmDisabled, cancelDisabled, onCancel, onConfirm } = props
+    return (
+        <DialogActions>
+            <Button onClick={onCancel} disabled={cancelDisabled}>
+                Cancel
+            </Button>
+            <Button
+                color="error"
+                variant="contained"
+                disabled={confirmDisabled}
+                onClick={onConfirm}
+            >
+                {confirmLabel}
+            </Button>
+        </DialogActions>
+    )
+}
+
 /**
  * Ask the viewer to confirm, then run the action and show any failure inline.
  *
@@ -30,7 +64,10 @@ export interface ConfirmDialogProps {
  * shows its message and keeps the dialog open; the caller closes it on
  * success. The confirm button is disabled while the action runs and while the
  * dialog closes: MUI keeps a closing dialog clickable through its fade-out, and
- * a click there would run the action again.
+ * a click there would run the action again. While the action runs, Cancel,
+ * Escape, and a backdrop click do nothing: a caller that closes whichever dialog
+ * is open when the action finishes, as `RecordSection` does, would otherwise
+ * close a dialog the viewer opened in the meantime.
  *
  * @param props - The component props.
  * @returns The dialog element.
@@ -60,7 +97,7 @@ export default function ConfirmDialog(props: ConfirmDialogProps) {
     }
 
     return (
-        <Dialog open={open} onClose={handleCancel}>
+        <Dialog open={open} onClose={pending ? undefined : handleCancel}>
             <DialogTitle>{title}</DialogTitle>
             <DialogContent>
                 {error && (
@@ -70,17 +107,13 @@ export default function ConfirmDialog(props: ConfirmDialogProps) {
                 )}
                 <DialogContentText>{message}</DialogContentText>
             </DialogContent>
-            <DialogActions>
-                <Button onClick={handleCancel}>Cancel</Button>
-                <Button
-                    color="error"
-                    variant="contained"
-                    disabled={pending || !open}
-                    onClick={() => void handleConfirm()}
-                >
-                    {confirmLabel ?? 'Delete'}
-                </Button>
-            </DialogActions>
+            <ConfirmDialogButtons
+                confirmLabel={confirmLabel ?? 'Delete'}
+                confirmDisabled={pending || !open}
+                cancelDisabled={pending}
+                onCancel={handleCancel}
+                onConfirm={() => void handleConfirm()}
+            />
         </Dialog>
     )
 }

@@ -5,6 +5,14 @@ import type { QueryKey } from '@tanstack/react-query'
 
 import type { ResourceApi } from '../api/resources'
 
+/** What {@link useResourceMutations} does beyond invalidating the resource's key. */
+interface ResourceMutationOptions<TRecord> {
+    /** Further keys to invalidate on success, such as another resource's list. */
+    alsoInvalidate?: QueryKey[]
+    /** Receives each record an update saves, such as to refresh another copy of it. */
+    onUpdated?: (record: TRecord) => void
+}
+
 /**
  * Build create, update, and remove mutations for one top-level resource.
  *
@@ -14,15 +22,16 @@ import type { ResourceApi } from '../api/resources'
  *
  * @param key - The resource's cache key.
  * @param api - The resource's API functions.
- * @param alsoInvalidate - Further keys to invalidate on success, such as another
- *   resource's list that shows these records.
+ * @param options - Further keys to invalidate on success, and a callback for each
+ *   record an update saves.
  * @returns The three mutations.
  */
 export function useResourceMutations<TRecord, TPayload>(
     key: QueryKey,
     api: ResourceApi<TRecord, TPayload>,
-    alsoInvalidate: QueryKey[] = [],
+    options: ResourceMutationOptions<TRecord> = {},
 ) {
+    const { alsoInvalidate = [], onUpdated } = options
     const queryClient = useQueryClient()
     /** Invalidate the resource's queries and every extra key. */
     const invalidate = () => {
@@ -37,7 +46,10 @@ export function useResourceMutations<TRecord, TPayload>(
     const update = useMutation({
         mutationFn: ({ id, payload }: { id: number; payload: TPayload }) =>
             api.update(id, payload),
-        onSuccess: invalidate,
+        onSuccess: (record) => {
+            invalidate()
+            onUpdated?.(record)
+        },
     })
     const remove = useMutation({
         mutationFn: (id: number) => api.remove(id),

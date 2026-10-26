@@ -3,6 +3,8 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { usersApi } from '../api/users'
+import { useAuthStore } from '../store/auth'
+import type { User } from '../types/users'
 import { useResourceMutations } from './resources'
 
 /** Cache key for the account list. */
@@ -16,14 +18,32 @@ const USERS_KEY = ['users'] as const
 export const useUsers = () => useQuery({ queryKey: USERS_KEY, queryFn: usersApi.list })
 
 /**
+ * Store a saved account as the signed-in user when it is that account.
+ *
+ * The update route answers with the fields `/me` returns, so the app bar shows an
+ * edited email at once instead of after a reload, and the id is unchanged, so
+ * `useSessionQueryCache` keeps the cache. Any other account, or a response that
+ * lands after sign-out, leaves the store alone.
+ *
+ * @param user - The account as the server saved it.
+ */
+function syncSignedInUser(user: User) {
+    const { user: signedIn, setUser } = useAuthStore.getState()
+    if (signedIn?.id === user.id) setUser(user)
+}
+
+/**
  * Build the create and update mutations for accounts.
  *
  * The server has no delete route, so there is no `remove`, and a record section
- * given these mutations offers no Delete.
+ * given these mutations offers no Delete. An update to the signed-in account also
+ * replaces the auth store's copy of it.
  *
  * @returns The create and update mutations.
  */
 export function useUserMutations() {
-    const { create, update } = useResourceMutations(USERS_KEY, usersApi)
+    const { create, update } = useResourceMutations(USERS_KEY, usersApi, {
+        onUpdated: syncSignedInUser,
+    })
     return { create, update }
 }

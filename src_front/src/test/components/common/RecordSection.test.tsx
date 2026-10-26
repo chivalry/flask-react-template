@@ -9,7 +9,7 @@ import RecordSection from '../../../components/common/RecordSection'
 import type { RecordDialogProps } from '../../../components/common/RecordSection'
 import type { AuthUser } from '../../../types/auth'
 import { findDialog, rowContaining } from '../../utils/dialogQueries'
-import { cancelOpenDialog } from '../../utils/dialogs'
+import { cancelOpenDialog, pressEscapeInDialog } from '../../utils/dialogs'
 import { adminUser, plainUser } from '../../utils/fixtures'
 
 interface Payload {
@@ -63,6 +63,17 @@ const waitForDialogToClose = () =>
 const openDelete = async (user: ReturnType<typeof userEvent.setup>, email: string) => {
     await user.click(rowContaining(email).getByRole('button', { name: 'Delete' }))
     return findDialog()
+}
+
+/** Render the section, then confirm the plain user's delete and return the dialog. */
+const confirmPlainUserDelete = async (
+    user: ReturnType<typeof userEvent.setup>,
+    mutations: ReturnType<typeof allMutations>,
+) => {
+    renderSection({ mutations })
+    const dialog = await openDelete(user, plainUser.email)
+    await user.click(dialog.getByRole('button', { name: 'Delete' }))
+    return dialog
 }
 
 describe('RecordSection', () => {
@@ -135,14 +146,36 @@ describe('RecordSection', () => {
         expect(mutations.remove.mutateAsync).not.toHaveBeenCalled()
     })
 
+    it('keeps the confirmation open until a slow delete settles', async () => {
+        const user = userEvent.setup()
+        const mutations = allMutations()
+        let resolveRemove: () => void = () => undefined
+        mutations.remove.mutateAsync.mockReturnValue(
+            new Promise<void>((resolve) => {
+                resolveRemove = resolve
+            }),
+        )
+
+        const dialog = await confirmPlainUserDelete(user, mutations)
+
+        expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+        pressEscapeInDialog()
+        // Dismissing clears the selected record at once, which blanks the message of
+        // the closing confirmation; a held-open one keeps it.
+        expect(dialog.getByText('This cannot be undone.')).toBeInTheDocument()
+
+        resolveRemove()
+
+        await waitForDialogToClose()
+        expect(mutations.remove.mutateAsync).toHaveBeenCalledWith(plainUser.id)
+    })
+
     it('keeps the confirmation open with the error when the delete fails', async () => {
         const user = userEvent.setup()
         const mutations = allMutations()
         mutations.remove.mutateAsync.mockRejectedValue(new Error('User is in use.'))
-        renderSection({ mutations })
 
-        const dialog = await openDelete(user, plainUser.email)
-        await user.click(dialog.getByRole('button', { name: 'Delete' }))
+        const dialog = await confirmPlainUserDelete(user, mutations)
 
         expect(await dialog.findByRole('alert')).toHaveTextContent('User is in use.')
         expect(mutations.remove.mutateAsync).toHaveBeenCalledWith(plainUser.id)

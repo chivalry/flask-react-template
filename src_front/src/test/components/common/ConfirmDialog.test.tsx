@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ConfirmDialog from '../../../components/common/ConfirmDialog'
 import type { ConfirmDialogProps } from '../../../components/common/ConfirmDialog'
+import { pressEscapeInDialog } from '../../utils/dialogs'
 
 const onCancel = vi.fn()
 const onConfirm = vi.fn<() => Promise<void>>()
@@ -53,7 +54,7 @@ describe('ConfirmDialog', () => {
         expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
     })
 
-    it('runs onConfirm and disables the button while it is pending', async () => {
+    it('runs onConfirm and holds the dialog open while it is pending', async () => {
         const user = userEvent.setup()
         let resolveConfirm: () => void = () => undefined
         onConfirm.mockReturnValue(
@@ -67,12 +68,18 @@ describe('ConfirmDialog', () => {
 
         expect(onConfirm).toHaveBeenCalledTimes(1)
         expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled()
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+        // The caller closes whichever dialog is open once the action settles, so a
+        // dismissal now would let that close land on the next dialog instead.
+        pressEscapeInDialog()
+        expect(onCancel).not.toHaveBeenCalled()
 
         resolveConfirm()
 
         await waitFor(() =>
             expect(screen.getByRole('button', { name: 'Delete' })).toBeEnabled(),
         )
+        expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
         expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
 
@@ -103,6 +110,14 @@ describe('ConfirmDialog', () => {
 
         expect(onCancel).toHaveBeenCalledTimes(1)
         expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('calls onCancel when Escape is pressed', () => {
+        renderDialog()
+
+        pressEscapeInDialog()
+
+        expect(onCancel).toHaveBeenCalledTimes(1)
     })
 
     it('renders nothing while closed', () => {

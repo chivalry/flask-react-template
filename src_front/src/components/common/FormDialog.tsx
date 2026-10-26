@@ -9,6 +9,7 @@ import {
     DialogContent,
     DialogTitle,
 } from '@mui/material'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { FormProvider, useForm } from 'react-hook-form'
 import type { DefaultValues, FieldValues } from 'react-hook-form'
@@ -31,10 +32,20 @@ export interface FormDialogProps<
     children: ReactNode
 }
 
+/** Props accepted by {@link FormDialogBody}. */
+interface FormDialogBodyProps<
+    TInput extends FieldValues,
+    TOutput extends FieldValues,
+> extends FormDialogProps<TInput, TOutput> {
+    /** Whether the caller's `onSubmit` is still running. */
+    pending: boolean
+}
+
 /** Props accepted by {@link FormDialogButtons}. */
 interface FormDialogButtonsProps {
     submitLabel: string
     submitting: boolean
+    cancelDisabled: boolean
     onClose: () => void
 }
 
@@ -45,10 +56,12 @@ interface FormDialogButtonsProps {
  * @returns The dialog actions element.
  */
 function FormDialogButtons(props: FormDialogButtonsProps) {
-    const { submitLabel, submitting, onClose } = props
+    const { submitLabel, submitting, cancelDisabled, onClose } = props
     return (
         <DialogActions>
-            <Button onClick={onClose}>Cancel</Button>
+            <Button onClick={onClose} disabled={cancelDisabled}>
+                Cancel
+            </Button>
             <Button type="submit" variant="contained" disabled={submitting}>
                 {submitLabel}
             </Button>
@@ -63,15 +76,15 @@ function FormDialogButtons(props: FormDialogButtonsProps) {
  * given default values without an explicit reset. Until then the content stays
  * mounted through the fade-out, so the submit button is disabled while `open` is
  * false: a second click there would reach the caller's handler after it had
- * already cleared its editing state.
+ * already cleared its editing state. Cancel is disabled while `pending`.
  *
  * @param props - The component props.
  * @returns The form element.
  */
 function FormDialogBody<TInput extends FieldValues, TOutput extends FieldValues>(
-    props: FormDialogProps<TInput, TOutput>,
+    props: FormDialogBodyProps<TInput, TOutput>,
 ) {
-    const { open, title, submitLabel, onClose, onSubmit, children } = props
+    const { open, title, submitLabel, pending, onClose, onSubmit, children } = props
     const methods = useForm<TInput, unknown, TOutput>({
         resolver: zodResolver(props.schema),
         defaultValues: props.defaultValues,
@@ -107,6 +120,7 @@ function FormDialogBody<TInput extends FieldValues, TOutput extends FieldValues>
                 <FormDialogButtons
                     submitLabel={submitLabel ?? 'Save'}
                     submitting={methods.formState.isSubmitting || !open}
+                    cancelDisabled={pending}
                     onClose={onClose}
                 />
             </form>
@@ -118,7 +132,10 @@ function FormDialogBody<TInput extends FieldValues, TOutput extends FieldValues>
  * Show a form in a dialog and submit it through the caller's handler.
  *
  * A rejected `onSubmit` shows its message above the fields and leaves the
- * dialog open; the caller closes it on success.
+ * dialog open; the caller closes it on success. Until `onSubmit` settles,
+ * Cancel, Escape, and a backdrop click do nothing: a caller that closes whichever
+ * dialog is open when its request finishes, as `RecordSection` does, would
+ * otherwise close a dialog the viewer opened in the meantime.
  *
  * @param props - The component props.
  * @returns The dialog element.
@@ -127,10 +144,31 @@ export default function FormDialog<
     TInput extends FieldValues,
     TOutput extends FieldValues,
 >(props: FormDialogProps<TInput, TOutput>) {
-    const { open, onClose } = props
+    const { open, onClose, onSubmit } = props
+    const [pending, setPending] = useState(false)
+
+    /**
+     * Run the caller's submit handler, holding the dialog open until it settles.
+     *
+     * @param values - The validated form values.
+     */
+    const submit = async (values: TOutput) => {
+        setPending(true)
+        try {
+            await onSubmit(values)
+        } finally {
+            setPending(false)
+        }
+    }
+
     return (
-        <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-            <FormDialogBody {...props} />
+        <Dialog
+            open={open}
+            onClose={pending ? undefined : onClose}
+            fullWidth
+            maxWidth="sm"
+        >
+            <FormDialogBody {...props} onSubmit={submit} pending={pending} />
         </Dialog>
     )
 }

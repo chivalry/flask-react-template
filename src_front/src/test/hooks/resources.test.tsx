@@ -38,6 +38,8 @@ const api = {
     remove: vi.fn<ThingApi['remove']>(),
 }
 
+const onUpdated = vi.fn<(record: Thing) => void>()
+
 let queryClient: QueryClient
 
 /** Supply the test's query client to the hook. */
@@ -55,9 +57,14 @@ function spyOnCache() {
 
 /** Render the mutations for `['things']`, with `['other']` as an extra key. */
 function renderMutations() {
-    return renderHook(() => useResourceMutations(['things'], api, [['other']]), {
-        wrapper: Wrapper,
-    })
+    return renderHook(
+        () =>
+            useResourceMutations(['things'], api, {
+                alsoInvalidate: [['other']],
+                onUpdated,
+            }),
+        { wrapper: Wrapper },
+    )
 }
 
 /** Run one mutation, then check that it invalidated both keys and dropped no query. */
@@ -92,6 +99,7 @@ describe('useResourceMutations', () => {
         )
 
         expect(api.create).toHaveBeenCalledWith(payload)
+        expect(onUpdated).not.toHaveBeenCalled()
     })
 
     it('update sends the id and payload, then invalidates both keys', async () => {
@@ -100,6 +108,7 @@ describe('useResourceMutations', () => {
         )
 
         expect(api.update).toHaveBeenCalledWith(8, payload)
+        expect(onUpdated.mock.calls).toEqual([[thing]])
     })
 
     it('remove drops the detail query before invalidating both keys', async () => {
@@ -123,7 +132,7 @@ describe('useResourceMutations', () => {
         expect(queryClient.getQueryState(['things'])?.isInvalidated).toBe(true)
     })
 
-    it('invalidates only the resource key when given no extra keys', async () => {
+    it('invalidates only the resource key when given no options', async () => {
         const { invalidateQueries } = spyOnCache()
         const { result } = renderHook(() => useResourceMutations(['things'], api), {
             wrapper: Wrapper,
@@ -131,8 +140,12 @@ describe('useResourceMutations', () => {
 
         await act(async () => {
             await result.current.create.mutateAsync(payload)
+            await result.current.update.mutateAsync({ id: 8, payload })
         })
 
-        expect(invalidateQueries.mock.calls).toEqual([[{ queryKey: ['things'] }]])
+        expect(invalidateQueries.mock.calls).toEqual([
+            [{ queryKey: ['things'] }],
+            [{ queryKey: ['things'] }],
+        ])
     })
 })

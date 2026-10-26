@@ -46,13 +46,25 @@ Flask-Login's `UserMixin.is_authenticated` follows `is_active` as well, so
 
 ## First admin
 
-The seed (`src_back/seed.py`) creates the first admin from `ADMIN_EMAIL` and
-`ADMIN_PASSWORD` on every backend start. It skips, printing why, when either is blank
-or an account already has that email in any letter case, and it never changes an
-existing account, so changing `ADMIN_PASSWORD` later resets nobody; change a password
-on the Users screen instead. `scripts/provision.sh` writes a random `ADMIN_PASSWORD` and
-a blank `ADMIN_EMAIL` into the server's `.env`; fill in the email before the first
-deploy.
+The seed (`src_back/seed.py`) runs on every backend start and creates the first admin
+from `ADMIN_EMAIL` and `ADMIN_PASSWORD`. It skips, printing why, when either is blank,
+when any admin account exists, active or not, or when an account already has that email
+in any letter case. Checking for an admin, not only for the email, keeps the bootstrap
+to one run: an admin who changes their email on the Users screen would otherwise get a
+second admin, with the bootstrap password, on the next start. The seed never changes or
+promotes an existing account, so changing `ADMIN_PASSWORD` later resets nobody; change a
+password on the Users screen instead.
+
+`scripts/provision.sh` writes a random `ADMIN_PASSWORD` and a blank `ADMIN_EMAIL` into the
+server's `.env`; fill in the email before the first deploy. Once an admin exists, the two
+variables do nothing, so `ADMIN_PASSWORD` can be cleared from `.env` after that deploy. An
+admin cannot deactivate or demote themself, so an active admin normally remains. If a
+database edit leaves every admin deactivated, the seed will not create another;
+reactivate one in a database shell (opened as in "Before deploying" below):
+
+```sql
+UPDATE users SET is_active = true WHERE email = '<email>';
+```
 
 ## Configuration
 

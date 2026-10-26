@@ -106,10 +106,11 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   auth store on a 401.
 - The Zustand auth store holds the signed-in user. `fetchMe()` runs once on mount and
   `ProtectedRoute` waits for it; login and register store the user from their own
-  response, and a `/me` response that lands after a sign-in or sign-out is discarded
-  as stale. Only a 401 from `/me` ends the session; any other failure keeps the
-  current user and raises `sessionCheckFailed`, which `ProtectedRoute` renders as a
-  retry alert instead of a redirect. Pages render inside `AppShell`.
+  response, as an admin's edit of their own account does from the update's, and a
+  `/me` response that lands after a sign-in or sign-out is discarded as stale. Only a
+  401 from `/me` ends the session; any other failure keeps the current user and raises
+  `sessionCheckFailed`, which `ProtectedRoute` renders as a retry alert instead of a
+  redirect. Pages render inside `AppShell`.
 - Pages load through `React.lazy` in `App.tsx`, so each ships in its own chunk, and
   `AppShell` wraps its `Outlet` in `Suspense` so the app bar stays while a page loads.
   `RouteErrorBoundary`, a pathless layout route in `App.tsx`, puts every page inside an
@@ -124,12 +125,13 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   Each resource gets an API module built with `resource()` from `api/resources.ts` and
   a hooks module, such as `hooks/users.ts`, with a `useQuery` for its list and
   `useResourceMutations()` from `hooks/resources.ts`, which invalidates the resource's
-  key, and any extra keys it is given, after a change. A record's detail query is keyed
-  `[...listKey, id]`; a delete removes it with `removeQueries` before invalidating the
-  list, because the list's prefix invalidation would otherwise refetch the deleted
-  record and show it from cache through the retries. `useSessionQueryCache()` in
-  `App.tsx` clears the cache whenever the signed-in account changes, so one account
-  never sees another's data.
+  key, and any `alsoInvalidate` keys, after a change and hands each record an update
+  saves to `onUpdated`, which the users hooks use to keep the auth store current. A
+  record's detail query is keyed `[...listKey, id]`; a delete removes it with
+  `removeQueries` before invalidating the list, because the list's prefix invalidation
+  would otherwise refetch the deleted record and show it from cache through the
+  retries. `useSessionQueryCache()` in `App.tsx` clears the cache whenever the
+  signed-in account changes, so one account never sees another's data.
 - Forms use React Hook Form with Zod schemas; a form in a dialog is a `FormDialog` whose
   fields are `FormTextField`, `FormSelectField`, and `FormSwitchField` from
   `components/common/`. Request errors surface through `useApiError`, which
@@ -138,8 +140,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   otherwise the user sees just "Invalid request".
 - A list of records with create, edit, and delete dialogs is a `RecordSection`, given
   the resource's mutations and a `renderDialog` for its form dialog; without
-  `mutations.remove`, no row offers Delete. `QueryState` renders a query's spinner,
-  error, or data.
+  `mutations.remove`, no row offers Delete. The section closes whichever dialog is open
+  when a save or delete settles, so `FormDialog` and `ConfirmDialog` cannot be
+  dismissed while their request runs, and a dialog built another way must hold itself
+  open the same way. `QueryState` renders a query's spinner, error, or data.
 - Component files export only components: `react-refresh/only-export-components` warns
   on any other export except a primitive constant, and CI fails on warnings, so shared
   constants and helpers live in `.ts` modules.

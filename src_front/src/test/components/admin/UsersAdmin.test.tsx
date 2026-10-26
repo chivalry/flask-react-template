@@ -9,6 +9,7 @@ import UsersAdmin from '../../../components/admin/UsersAdmin'
 import { useAuthStore } from '../../../store/auth'
 import type { User } from '../../../types/users'
 import { findDialog, rowContaining } from '../../utils/dialogQueries'
+import { pressEscapeInDialog } from '../../utils/dialogs'
 import { adminUser, plainUser } from '../../utils/fixtures'
 import { renderWithProviders } from '../../utils/renderWithProviders'
 
@@ -188,6 +189,32 @@ describe('UsersAdmin', () => {
                 is_active: true,
             }),
         )
+    })
+
+    it('keeps a slow save open until it settles', async () => {
+        const user = userEvent.setup()
+        let resolveUpdate: (account: User) => void = () => undefined
+        vi.mocked(usersApi.update).mockReturnValue(
+            new Promise<User>((resolve) => {
+                resolveUpdate = resolve
+            }),
+        )
+        renderUsersAdmin()
+        const dialog = await openEditDialog(user, plainUser.email)
+
+        await user.click(dialog.getByRole('button', { name: 'Save' }))
+
+        await waitFor(() =>
+            expect(dialog.getByRole('button', { name: 'Cancel' })).toBeDisabled(),
+        )
+        pressEscapeInDialog()
+        // Dismissing clears the edited account at once, which retitles the closing
+        // dialog "New user"; a held-open one keeps its title.
+        expect(dialog.getByRole('heading', { name: 'Edit user' })).toBeInTheDocument()
+
+        resolveUpdate(plainUser)
+
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     })
 
     it('locks the role and active switch on the signed-in admin', async () => {
