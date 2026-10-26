@@ -1,5 +1,7 @@
 #!/bin/sh
-# Start containers. In development, auto-assigns free host ports before starting.
+# Start containers. In development, auto-assigns free host ports, then builds the images
+# from the working tree and watches it (develop.watch in docker-compose.override.yml),
+# so saved edits reach the running containers.
 #
 # Starting values come from .env, so ports shifted by scripts/worktree-setup.sh are
 # respected, falling back to .env.example. A stack that is already running keeps
@@ -66,4 +68,24 @@ elif [ -n "$already_running" ]; then
   echo "Stack already running; keeping the ports in .env."
 fi
 
-docker compose up "$@"
+# Production starts as it always has: no build, no watch.
+if [ "$flask_env" = "production" ]; then
+  docker compose up "$@"
+  exit
+fi
+
+# Compose cannot watch a detached stack, and --wait implies detached, so say so.
+detached=
+for arg in "$@"; do
+  case "$arg" in
+    -d | --detach | --wait) detached=1 ;;
+  esac
+done
+
+if [ -n "$detached" ]; then
+  echo "Starting detached, so not watching: saved edits will not reach the containers."
+  echo "  Watch them with: docker compose watch --no-up"
+  docker compose up --build "$@"
+else
+  docker compose up --build --watch "$@"
+fi

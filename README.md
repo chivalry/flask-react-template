@@ -68,20 +68,56 @@ Admin page.
 ## Docker
 
 ```bash
-npm run docker:up        # start; picks free ports and writes them to .env
+npm run docker:up        # build, start, and watch; picks free ports for .env
 npm run docker:url       # wait for the frontend and print its URL
-npm run docker:up:build  # rebuild images first
 npm run docker:down
 ```
+
+`npm run docker:up` builds both images from the working tree, starts the stack, and
+stays attached while Compose watches the source, so a saved edit reaches the running
+containers with no rebuild or restart command:
+
+- Saving, adding, or deleting a file under `src_back/` or `migrations/` reaches the
+  backend, and Flask's development server reloads; debug mode and its debugger stay
+  off. An edit that breaks an import leaves the backend answering 500 until the fix
+  lands, even when the fix is a new module, and a backend started while an import is
+  broken restarts until the fix is saved.
+- A file saved under `src_front/` reaches the open page through Vite's hot module
+  replacement.
+- A deleted or renamed file leaves the container as well.
+- A change to `docker/entrypoint.sh`, `vite.config.ts`, or a `tsconfig*.json` restarts
+  its container, and a change to `requirements.txt`, `package.json`,
+  `package-lock.json`, or a Dockerfile rebuilds its image and replaces the container.
+
+Building on every start reuses the cached dependency layers, so it costs little unless a
+dependency file changed, and it brings in whatever changed while the stack was stopped,
+so no separate rebuild command is needed. A change to a Compose file takes effect at the
+next `npm run docker:up`.
+
+`npm run docker:up -- -d` starts in the background without watching and says so;
+`docker compose watch --no-up` watches a stack started that way. The watch rules live in
+`docker-compose.override.yml`, which Compose reads only when no `-f` is given, so the
+production stack never loads them. Watching needs Docker Compose 2.24.7 or newer.
+
+A revision generated with `db migrate` reaches the backend without restarting its
+container, so the entrypoint's `db upgrade` does not run and the revision waits for
+review; apply it from the host with `db upgrade` as before. Every backend start runs
+that `db upgrade`, so review a new revision before anything restarts or rebuilds the
+backend: `npm run docker:up`, `docker compose restart`, or a saved change to
+`docker/entrypoint.sh`, `requirements.txt`, or `docker/backend.Dockerfile`. A database
+at a revision the checkout lacks, such as one applied on another branch, stops the
+backend at its next start: check out a branch that has the revision and run
+`db downgrade` to one both branches share.
 
 The backend container runs migrations and the seed on every start; a seed that exits
 non-zero stops the container. With `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env`, the
 first start creates that admin. Uploaded files live in the `uploads_data` volume, so they
 survive rebuilds.
 
-The backend image installs only `requirements.txt`, the runtime packages. The lint,
-type-check, and test tools come from `requirements-dev.txt` and run from `.venv`, never
-inside the Compose containers.
+The backend image installs only `requirements.txt`, the runtime packages, plus
+`watchdog` for the reloader when the dev stack builds it. The lint, type-check, and test
+tools come from `requirements-dev.txt` and run from `.venv`, never inside the Compose
+containers.
 
 ## Worktrees
 
@@ -128,30 +164,29 @@ git branch -D issue-12-some-slug
 
 ## Scripts
 
-| Command                   | Description                                     |
-| ------------------------- | ----------------------------------------------- |
-| `npm run dev`             | Vite dev server (no Docker)                     |
-| `npm run build`           | Type check (`tsc -b`) and production build      |
-| `npm run typecheck`       | `tsc -b` only                                   |
-| `npm test`                | Frontend and backend suites, both with coverage |
-| `npm run test:front`      | Vitest with 100% thresholds                     |
-| `npm run test:back`       | pytest with 100% coverage enforced              |
-| `npm run test:scripts`    | Shell script syntax checks and `scripts/tests/` |
-| `npm run test:watch`      | Vitest in watch mode                            |
-| `npm run lint`            | ESLint (CI adds `--max-warnings=0`)             |
-| `npm run lint:py`         | Ruff, pydoclint, function length, basedpyright  |
-| `npm run lint:md`         | markdownlint                                    |
-| `npm run format`          | Prettier over the repository                    |
-| `npm run format:py`       | Ruff format                                     |
-| `npm run fallow`          | Duplication and dead-code audit                 |
-| `npm run docker:up`       | Start containers (auto-assigns ports)           |
-| `npm run docker:up:build` | Rebuild images then start containers            |
-| `npm run docker:url`      | Print the running frontend's URL                |
-| `npm run docker:seed`     | Run the seed inside the backend container       |
-| `npm run docker:logs`     | Tail container logs                             |
-| `npm run docker:down`     | Stop and remove containers                      |
-| `npm run docker:prod:up`  | Start the production stack locally              |
-| `npm run deploy`          | Deploy to `DEPLOY_HOST` (or a host argument)    |
+| Command                  | Description                                     |
+| ------------------------ | ----------------------------------------------- |
+| `npm run dev`            | Vite dev server (no Docker)                     |
+| `npm run build`          | Type check (`tsc -b`) and production build      |
+| `npm run typecheck`      | `tsc -b` only                                   |
+| `npm test`               | Frontend and backend suites, both with coverage |
+| `npm run test:front`     | Vitest with 100% thresholds                     |
+| `npm run test:back`      | pytest with 100% coverage enforced              |
+| `npm run test:scripts`   | Shell script syntax checks and `scripts/tests/` |
+| `npm run test:watch`     | Vitest in watch mode                            |
+| `npm run lint`           | ESLint (CI adds `--max-warnings=0`)             |
+| `npm run lint:py`        | Ruff, pydoclint, function length, basedpyright  |
+| `npm run lint:md`        | markdownlint                                    |
+| `npm run format`         | Prettier over the repository                    |
+| `npm run format:py`      | Ruff format                                     |
+| `npm run fallow`         | Duplication and dead-code audit                 |
+| `npm run docker:up`      | Build, start, and watch the dev stack           |
+| `npm run docker:url`     | Print the running frontend's URL                |
+| `npm run docker:seed`    | Run the seed inside the backend container       |
+| `npm run docker:logs`    | Tail container logs                             |
+| `npm run docker:down`    | Stop and remove containers                      |
+| `npm run docker:prod:up` | Start the production stack locally              |
+| `npm run deploy`         | Deploy to `DEPLOY_HOST` (or a host argument)    |
 
 ## Project layout
 

@@ -1,11 +1,12 @@
 # Tools and Libraries
 
 Why each tool and library in this repository is here, one short entry apiece. The
-pinned versions live in `requirements.txt`, `requirements-dev.txt`, and `package.json`;
-the server-side tools are installed by the scripts under `scripts/` and the images under
-`docker/`. `ai/project.md` describes the repository's own scripts and commands, and the
-runbooks `ai/backups.md` and `ai/tls.md` describe how the operations tools are used.
-This file only explains what each one is for.
+pinned versions live in `requirements.txt`, `requirements-dev.txt`, and `package.json`,
+apart from watchdog's in `docker-compose.override.yml`; the server-side tools are
+installed by the scripts under `scripts/` and the images under `docker/`.
+`ai/project.md` describes the repository's own scripts and commands, and the runbooks
+`ai/backups.md` and `ai/tls.md` describe how the operations tools are used. This file
+only explains what each one is for.
 
 ## Languages and runtimes
 
@@ -31,12 +32,13 @@ This file only explains what each one is for.
 
 ## Backend runtime libraries
 
-Installed from `requirements.txt` into the backend image and into `.venv`.
+Installed from `requirements.txt` into the backend image and into `.venv`, except
+watchdog, which only the dev stack's backend image gets.
 
 - **Flask**: the web framework. `src_back/app.py` builds the app through a factory,
   registers one blueprint per domain, maps exceptions to JSON error envelopes, and
   serves the built SPA and the login-protected uploads. Its `flask` command applies
-  the migrations and runs the local development server.
+  the migrations and runs the development server, on the host and in the dev stack.
 - **Werkzeug**: Flask's underlying WSGI toolkit, installed with Flask rather than
   pinned on its own. The code uses it directly for password hashing in
   `src_back/models/user.py`, for the `NotFound` exception the SPA fallback catches
@@ -75,9 +77,14 @@ Installed from `requirements.txt` into the backend image and into `.venv`.
   command, the seed, and pytest read the same settings on the host. In the containers
   Compose supplies the variables instead, and `.dockerignore` keeps `.env` out of the
   image.
-- **gunicorn**: the WSGI server in both Compose stacks. `docker/entrypoint.sh` starts it
-  after the migrations and the seed, with `GUNICORN_WORKERS` workers: 2 by default, 4
-  in the production override. Work without Docker uses Flask's development server.
+- **gunicorn**: the production WSGI server. `docker/entrypoint.sh` starts it after the
+  migrations and the seed whenever `FLASK_ENV` is not `development`, with
+  `GUNICORN_WORKERS` workers: 2 by default, 4 in the production override. The dev stack
+  and work without Docker use Flask's development server.
+- **watchdog**: not in `requirements.txt`; the dev stack's build installs it into the
+  backend image through the `DEVELOPMENT_PACKAGES` build argument. Flask's reloader uses
+  it when present and then notices modules being added and deleted, which its fallback
+  stat reloader misses.
 
 ## Backend quality and test tools
 
@@ -217,19 +224,24 @@ The `devDependencies` in `package.json`.
 ## Containers and images
 
 - **Docker Engine**: runs the database, backend, and frontend as containers in
-  development and on the production server, so the backend runs the same image and
-  entrypoint in both. `scripts/provision.sh` installs it from Docker's own apt
-  repository, with its CLI, containerd, and the Buildx and Compose plugins.
+  development and on the production server, so the backend builds from the same
+  Dockerfile and runs the same entrypoint in both. `scripts/provision.sh` installs it
+  from Docker's own apt repository, with its CLI, containerd, and the Buildx and
+  Compose plugins.
 - **Docker Compose**: defines the stacks. `docker-compose.yml` is the development
-  stack and the base for production; `docker/docker-compose.prod.yml` swaps the
-  frontend for the nginx image, binds the backend and frontend to loopback ports for
-  host nginx, and stops publishing the database port. Its `!reset` and `!override`
-  tags need Compose 2.24.4 or newer.
+  stack and the base for production. `docker-compose.override.yml`, which Compose loads
+  only when no `-f` is given, adds the development file watch that syncs edits into the
+  running containers; `npm run docker:up` watches through `up --watch`, which needs
+  Compose 2.24.7 or newer. `docker/docker-compose.prod.yml` swaps the frontend for the
+  nginx image, binds the backend and frontend to loopback ports for host nginx, and
+  stops publishing the database port. Its `!reset` and `!override` tags need Compose
+  2.24.4 or newer.
 - **Docker Buildx**: Docker's BuildKit build plugin. `docker/nginx.Dockerfile` relies
   on BuildKit's `$BUILDPLATFORM` to run its Node stage on the build machine's
   platform.
 - **`python:3.12-slim`**: the backend image base. It installs only `requirements.txt`,
-  so the image carries no lint, type-check, or test tools.
+  plus watchdog when the dev stack builds it, so the image carries no lint, type-check,
+  or test tools.
 - **`node:22-slim`**: the development frontend image, which runs the Vite dev server,
   and the build stage of the production frontend image.
 - **`nginx:1.27-alpine`**: the production frontend image. `docker/nginx.conf` serves
