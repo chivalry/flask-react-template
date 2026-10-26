@@ -85,6 +85,7 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
     if config_overrides:
         app.config.update(config_overrides)
     _guard_secret_key(app)
+    _resolve_public_base_url(app)
     _initialize_extensions(app)
     _register_blueprints(app)
     _register_error_handlers(app)
@@ -100,7 +101,10 @@ def _configure_application(app: Flask) -> None:
     present. Uploads are resolved to an absolute path and capped at
     ``MAX_UPLOAD_MB``. A sign-in lasts ``SESSION_LIFETIME_DAYS`` past its latest
     request: login makes the session permanent, and Flask re-sends a permanent
-    session's cookie with a fresh expiry on every response.
+    session's cookie with a fresh expiry on every response. ``PUBLIC_BASE_URL`` is
+    only read here; :func:`_resolve_public_base_url` settles it once the overrides
+    are applied. The site name that passkey prompts show falls back from
+    ``WEBAUTHN_RP_NAME`` to ``APP_NAME`` to the template's own name.
 
     Args:
         app: The application being configured.
@@ -122,6 +126,12 @@ def _configure_application(app: Flask) -> None:
         Path(os.environ.get('UPLOAD_FOLDER', 'src_back/uploads')).resolve()
     )
     app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_MB * 1024 * 1024
+    app.config['PUBLIC_BASE_URL'] = os.environ.get('PUBLIC_BASE_URL')
+    app.config['WEBAUTHN_RP_NAME'] = (
+        os.environ.get('WEBAUTHN_RP_NAME')
+        or os.environ.get('APP_NAME')
+        or 'Flask React Template'
+    )
 
 
 def _guard_secret_key(app: Flask) -> None:
@@ -134,12 +144,48 @@ def _guard_secret_key(app: Flask) -> None:
         RuntimeError: If ``FLASK_ENV`` is not ``development``, the app is not in
             testing mode, and ``SECRET_KEY`` is one of the shipped placeholders.
     """
-    if os.environ.get('FLASK_ENV') == 'development' or app.config.get('TESTING'):
+    if _is_development_or_testing(app):
         return
     if app.config['SECRET_KEY'] in _PLACEHOLDER_SECRET_KEYS:
         raise RuntimeError(
             'SECRET_KEY must be set to a secure value outside development.'
         )
+
+
+def _resolve_public_base_url(app: Flask) -> None:
+    """Settle ``PUBLIC_BASE_URL``, the one origin external URLs are built from.
+
+    OAuth redirect URIs and the WebAuthn origin derive from it, never from the
+    request: there is no ``ProxyFix``, so behind nginx the request does not carry the
+    public origin. A trailing slash is stripped. Development and testing fall back to
+    the Vite dev server on ``FRONTEND_PORT``; anywhere else an unset value becomes
+    ``None``, with a warning that OAuth sign-in and passkeys are disabled. This runs
+    after the overrides so that the testing flag and an injected URL both count.
+
+    Args:
+        app: The application being configured.
+    """
+    public_base_url = (app.config.get('PUBLIC_BASE_URL') or '').rstrip('/')
+    if not public_base_url and _is_development_or_testing(app):
+        frontend_port = os.environ.get('FRONTEND_PORT') or '5174'
+        public_base_url = f'http://localhost:{frontend_port}'
+    if not public_base_url:
+        _log.warning(
+            'PUBLIC_BASE_URL is not set: OAuth sign-in and passkeys are disabled.'
+        )
+    app.config['PUBLIC_BASE_URL'] = public_base_url or None
+
+
+def _is_development_or_testing(app: Flask) -> bool:
+    """Report whether development defaults and placeholder secrets are allowed.
+
+    Args:
+        app: The application being configured, with its overrides applied.
+
+    Returns:
+        ``True`` when ``FLASK_ENV`` is ``development`` or the app is in testing mode.
+    """
+    return os.environ.get('FLASK_ENV') == 'development' or bool(app.config.get('TESTING'))
 
 
 def _initialize_extensions(app: Flask) -> None:

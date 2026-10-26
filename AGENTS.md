@@ -7,6 +7,7 @@ Before making changes in this repository, read and follow these shared instructi
 - `ai/domain.md`
 - `ai/backups.md`
 - `ai/tls.md`
+- `ai/auth.md`
 - `~/.ai/standards/engineering.md`
 - `~/.ai/standards/testing.md`
 - `~/.ai/standards/git.md`

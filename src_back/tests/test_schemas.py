@@ -5,6 +5,7 @@ from flask import Flask
 from marshmallow import ValidationError
 
 from src_back.models import User
+from src_back.models.user import normalize_email
 from src_back.schemas.base import BaseSchema, validate_ids_exist
 from src_back.schemas.user import login_schema, user_schema
 from src_back.tests.conftest import Widget, WidgetNote
@@ -22,9 +23,23 @@ class WidgetNoteSchema(BaseSchema):
 
 def test_user_schema_dump_exposes_public_fields_only(user: User) -> None:
     data = cast(dict[str, Any], user_schema.dump(user))
-    assert set(data) == {'id', 'uuid', 'email', 'role', 'created_at', 'updated_at'}
+    assert set(data) == {
+        'id',
+        'uuid',
+        'email',
+        'role',
+        'has_password',
+        'created_at',
+        'updated_at',
+    }
     assert data['role'] == 'user'
     assert data['email'] == user.email
+    assert data['has_password'] is True
+
+
+def test_user_schema_dump_reports_a_passwordless_account(passwordless_user: User) -> None:
+    data = cast(dict[str, Any], user_schema.dump(passwordless_user))
+    assert data['has_password'] is False
 
 
 def test_user_schema_load_returns_email_and_password_only() -> None:
@@ -68,6 +83,22 @@ def test_base_schema_marks_audit_columns_dump_only(app: Flask) -> None:
 
 def test_user_repr_names_the_email(app: Flask) -> None:
     assert repr(User(email='a@b.test')) == '<User a@b.test>'
+
+
+def test_normalize_email_trims_and_lowercases() -> None:
+    assert normalize_email('  Mixed@Example.COM\n') == 'mixed@example.com'
+
+
+def test_user_stores_every_assigned_email_normalized(app: Flask) -> None:
+    account = User(email='  Mixed@Example.COM ')
+    assert account.email == 'mixed@example.com'
+    account.email = 'Other@Example.COM'
+    assert account.email == 'other@example.com'
+
+
+def test_user_without_a_password_never_matches_one(passwordless_user: User) -> None:
+    assert passwordless_user.has_password is False
+    assert passwordless_user.check_password('password123') is False
 
 
 @pytest.mark.parametrize('ids', [None, []])

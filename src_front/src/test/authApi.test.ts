@@ -23,6 +23,7 @@ const user: AuthUser = {
     uuid: '5f0c7f0a-1111-2222-3333-444444444444',
     email: 'user@example.com',
     role: 'user',
+    has_password: true,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
 }

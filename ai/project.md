@@ -93,9 +93,11 @@ runtime packages and is the file `docker/backend.Dockerfile` installs.
 
 ## Environment
 
-`.env.example` documents every variable. `scripts/up.sh` rewrites the port variables
-when a port is busy; `scripts/worktree-setup.sh` shifts them per worktree. Outside
-`FLASK_ENV=development`, the app refuses to start with a placeholder `SECRET_KEY`.
+`.env.example` documents every variable. `scripts/up.sh` rewrites the port variables,
+and `PUBLIC_BASE_URL` with them, when a port is busy; `scripts/worktree-setup.sh` shifts
+them per worktree. Outside `FLASK_ENV=development`, the app refuses to start with a
+placeholder `SECRET_KEY`, and without `PUBLIC_BASE_URL` it starts with OAuth sign-in
+and passkeys disabled.
 
 `src_back/app.py` calls `load_dotenv()` at import, so `.env` values are visible to pytest
 too. A test that depends on an environment variable sets or clears it with

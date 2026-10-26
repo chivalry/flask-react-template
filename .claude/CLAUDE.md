@@ -5,3 +5,4 @@
 @../ai/domain.md
 @../ai/backups.md
 @../ai/tls.md
+@../ai/auth.md

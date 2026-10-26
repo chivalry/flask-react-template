@@ -27,6 +27,8 @@ placeholders:
 - `COMPOSE_PROJECT_NAME` and `APP_NAME` in `.env.example`, and in `.env` if it already
   exists
 - the fallback project name on the first line of `docker-compose.yml`
+- `Flask React Template`, the last fallback for `WEBAUTHN_RP_NAME` in `src_back/app.py`,
+  and the test that expects it in `src_back/tests/test_app.py`
 - the `<title>` in `src_front/index.html`
 - the app bar title in `src_front/src/components/layout/AppShell.tsx`, and the tests
   that expect it, `src_front/src/test/App.test.tsx` and
@@ -200,10 +202,10 @@ venv is supported, but does not permit syntax newer than the deployed runtime.
 ## Agent instructions
 
 `ai/project.md`, `ai/conventions.md`, and `ai/domain.md` are the canonical project
-instructions; `ai/backups.md` and `ai/tls.md` are the operations runbooks. `AGENTS.md`
-and `.claude/CLAUDE.md` are thin adapters that point at them. `.claude/settings.json`
-runs `tsc -b` after every TypeScript edit and assigns new GitHub issues to the
-repository owner.
+instructions; `ai/auth.md`, `ai/backups.md`, and `ai/tls.md` are the operations
+runbooks. `AGENTS.md` and `.claude/CLAUDE.md` are thin adapters that point at them.
+`.claude/settings.json` runs `tsc -b` after every TypeScript edit and assigns new GitHub
+issues to the repository owner.
 
 ## Uploads
 

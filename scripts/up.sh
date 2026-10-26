@@ -42,7 +42,7 @@ if [ "$flask_env" != "production" ] && [ -z "$already_running" ]; then
   frontend_port=$(next_free_port "$(default_port FRONTEND_PORT 5174)")
 
   # Older .env files predate some keys; add them so the sed below has a line to edit.
-  for key in DB_PORT BACKEND_PORT FRONTEND_PORT VITE_API_URL; do
+  for key in DB_PORT BACKEND_PORT FRONTEND_PORT VITE_API_URL PUBLIC_BASE_URL; do
     grep -qE "^$key=" .env || echo "$key=" >> .env
   done
 
@@ -51,14 +51,17 @@ if [ "$flask_env" != "production" ] && [ -z "$already_running" ]; then
     | sed "s/^BACKEND_PORT=.*/BACKEND_PORT=${backend_port}/" \
     | sed "s/^FRONTEND_PORT=.*/FRONTEND_PORT=${frontend_port}/" \
     | sed "s|^VITE_API_URL=.*|VITE_API_URL=http://localhost:${backend_port}|" \
+    | sed "s|^PUBLIC_BASE_URL=\$|PUBLIC_BASE_URL=http://localhost:${frontend_port}|" \
+    | sed -E "s|^(PUBLIC_BASE_URL=http://localhost:)[0-9]+(/?)\$|\1${frontend_port}\2|" \
     | sed -E "s|^(DATABASE_URL=.*@localhost):[0-9]+/|\1:${db_port}/|" > "$tmp"
   mv "$tmp" .env
 
   echo "Port assignment:"
-  echo "  DB_PORT       = ${db_port}"
-  echo "  BACKEND_PORT  = ${backend_port}"
-  echo "  FRONTEND_PORT = ${frontend_port}"
-  echo "  VITE_API_URL  = http://localhost:${backend_port}"
+  echo "  DB_PORT         = ${db_port}"
+  echo "  BACKEND_PORT    = ${backend_port}"
+  echo "  FRONTEND_PORT   = ${frontend_port}"
+  echo "  VITE_API_URL    = http://localhost:${backend_port}"
+  echo "  PUBLIC_BASE_URL = $(read_env PUBLIC_BASE_URL .env)"
 elif [ -n "$already_running" ]; then
   echo "Stack already running; keeping the ports in .env."
 fi
