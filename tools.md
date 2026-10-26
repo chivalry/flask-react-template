@@ -201,6 +201,19 @@ The `devDependencies` in `package.json`.
 - **npm-run-all2**: provides `run-p`, which `npm test` uses to run the frontend and
   backend suites in parallel.
 
+## Shell script tests
+
+`npm run test:scripts` runs `scripts/tests/run-all.sh`, and so does CI.
+
+- **`scripts/tests/`**: Bash tests. Each `test-<script>.sh` runs its script against
+  stub commands such as `docker`, `lsof`, and `rclone`, which log their calls instead
+  of acting, and checks the log and the files the script wrote;
+  `test-compose-config.sh` checks the rendered Compose stacks instead. `run-all.sh`
+  first checks every script's syntax with `bash -n` or `sh -n`, as its shebang names.
+- **jq**: `test-compose-config.sh` queries the JSON that `docker compose config`
+  renders for each stack with it. The CI runner has it; locally, the test skips
+  without it or without the docker CLI.
+
 ## Containers and images
 
 - **Docker Engine**: runs the database, backend, and frontend as containers in
@@ -230,11 +243,12 @@ The `devDependencies` in `package.json`.
 ## GitHub
 
 - **GitHub Actions**: CI, in `.github/workflows/ci.yml`, on every push and pull
-  request. Its four jobs cover the backend (Ruff, pydoclint, the function-length
-  check, basedpyright, and pytest against a PostgreSQL service), the fallow audit
-  against the base branch, the frontend (ESLint, Prettier, markdownlint, and Vitest),
-  and the production build. `assign-issues.yml` assigns each new issue to the
-  repository owner through `actions/github-script`.
+  request, and on demand from the Actions tab. Its five jobs cover the backend (Ruff,
+  pydoclint, the function-length check, basedpyright, and pytest against a PostgreSQL
+  service), the fallow audit against the base branch, the frontend (ESLint, Prettier,
+  markdownlint, and Vitest), the production build, and the shell scripts (syntax checks
+  and `scripts/tests/`). `assign-issues.yml` assigns each new issue to the repository
+  owner through `actions/github-script`.
 - **Reusable actions**: `actions/checkout`, `actions/setup-python` with a pip cache
   keyed on both requirements files, `actions/setup-node` with the npm cache, and
   `actions/github-script`.
@@ -313,8 +327,8 @@ The server's packages come from `scripts/provision.sh` and `scripts/install-back
   `requirements-dev.txt`, installs `node_modules`, and forwards the Flask and Vite
   ports, so a fresh machine gets the whole toolchain.
 - **ShellCheck**: runs in the editor through its extension; two scripts carry
-  `# shellcheck` directives where its warnings do not apply. CI does not check the
-  shell scripts.
+  `# shellcheck` directives where its warnings do not apply. CI does not run it; its
+  shell-script job checks syntax with `bash -n` and `sh -n` and runs `scripts/tests/`.
 - **Claude Code**: `.claude/settings.json` pre-approves the project's npm, npx, venv,
   and Compose commands and adds two hooks, both reading their input with jq: `tsc -b`
   after every TypeScript edit, and `scripts/hook-issue-assign.sh`, which assigns an

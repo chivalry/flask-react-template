@@ -5,6 +5,8 @@ on:
     branches: ['**']
   pull_request:
     branches: ['**']
+  # Runs every job on a chosen branch from the Actions tab.
+  workflow_dispatch:
 
 jobs:
   backend:
@@ -138,3 +140,18 @@ jobs:
 
       - name: Type check and build
         run: npm run build
+
+  scripts:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # run-all.sh checks every script's syntax with the shell its shebang names, then
+      # runs scripts/tests/. The Compose test renders the stacks with the runner's
+      # docker CLI and jq, and because Actions sets CI=true, a test that skips itself
+      # fails the step.
+      - name: Shell script checks
+        run: bash scripts/tests/run-all.sh
