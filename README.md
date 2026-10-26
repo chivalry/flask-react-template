@@ -136,6 +136,7 @@ git branch -D issue-12-some-slug
 | `npm test`                | Frontend and backend suites, both with coverage |
 | `npm run test:front`      | Vitest with 100% thresholds                     |
 | `npm run test:back`       | pytest with 100% coverage enforced              |
+| `npm run test:scripts`    | Shell script syntax checks and `scripts/tests/` |
 | `npm run test:watch`      | Vitest in watch mode                            |
 | `npm run lint`            | ESLint (CI adds `--max-warnings=0`)             |
 | `npm run lint:py`         | Ruff, pydoclint, function length, basedpyright  |
@@ -182,6 +183,7 @@ project/
 ├── migrations/        # Alembic migrations (initial schema included)
 ├── docker/            # Dockerfiles, entrypoint, nginx, production override
 ├── scripts/           # Ports, worktrees, provisioning, deploy, TLS, backups
+│   └── tests/         # Shell script tests (npm run test:scripts)
 ├── plans/             # Implementation plans
 └── .github/workflows/ # CI, issue auto-assign
 ```

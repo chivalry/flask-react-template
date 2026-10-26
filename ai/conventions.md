@@ -157,6 +157,29 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `test/globalSetup.ts` pins `TZ` to `America/Los_Angeles`, where date-only bugs show,
   and `test/setup.ts` stubs `IntersectionObserver`, which jsdom lacks.
 
+## Shell Scripts
+
+- Every new or changed shell script gets a test, `scripts/tests/test-<script>.sh`, in
+  the style of the existing ones. The test runs the script against a disposable
+  directory, copying the script there and rewriting absolute system paths such as
+  `/var/log` with `sed` when it writes to them. It puts stub commands (`docker`,
+  `systemctl`, `lsof`, `rclone`, `curl`, and so on) first on `PATH`, checks that each
+  shadows the real command, and has each log its call to a `commands` file. It asserts
+  on that log, and on the files the script wrote, with grep-based `assert_contains` and
+  `refute_contains`, because a bare `! grep` never fails under `set -e`, or with `diff`
+  when the exact sequence of calls matters, as `test-entrypoint.sh` does.
+- Tests run under macOS's Bash 3.2 as well as on Linux, so they avoid `mapfile`,
+  associative arrays, `${var,,}`, `sed -i`, `grep -P`, and GNU-only options such as
+  `tail -z` and `find -printf`. A test that cannot run on the machine, because its
+  script needs Linux, as `backup.sh` does, or a tool is missing, says why and exits
+  with status 77. `scripts/tests/run-all.sh` counts that as a skip locally and as a
+  failure in CI, where every test must run.
+- Every script names its shell in a shebang (`#!/bin/sh`, `#!/bin/bash`, or
+  `#!/usr/bin/env bash`). `run-all.sh` checks each one with `sh -n` or `bash -n` to
+  match, and fails a `.sh` file without one. Tests are mode 644 and run as
+  `bash <file>`. `npm run test:scripts` runs the whole suite locally, and CI runs the
+  same file on Ubuntu, where `sh` is dash, as it is in the backend image.
+
 ## Git
 
 - `plans/` holds implementation plans; move finished plans to `plans/archive/`.

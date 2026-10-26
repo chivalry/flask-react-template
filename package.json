@@ -18,6 +18,7 @@
     "test": "run-p test:front test:back",
     "test:front": "vitest run --coverage",
     "test:back": ".venv/bin/python -m pytest",
+    "test:scripts": "bash scripts/tests/run-all.sh",
     "test:watch": "vitest",
     "prepare": "husky",
     "docker:up": "sh scripts/up.sh",

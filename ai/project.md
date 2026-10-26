@@ -42,7 +42,8 @@ that every contributor and agent follows.
 - `migrations/` - Alembic migrations
 - `plans/` - implementation plans; authoritative while a feature is in progress
 - `scripts/` - local tooling (ports, worktrees) and server provisioning, deployment,
-  TLS, and backup scripts
+  TLS, and backup scripts; `scripts/tests/` holds the shell-script tests and
+  `run-all.sh`, which checks every script's syntax and then runs them
 - `tools.md` - why each tool and library is in the repository
 
 ## Commands
@@ -54,6 +55,8 @@ runtime packages and is the file `docker/backend.Dockerfile` installs.
 - `npm run test` - frontend and backend suites in parallel, both with coverage
 - `npm run test:back` - `.venv/bin/python -m pytest` (100% coverage enforced)
 - `npm run test:front` - `vitest run --coverage` (100% thresholds)
+- `npm run test:scripts` - `bash -n` or `sh -n` on every shell script by its shebang,
+  then `scripts/tests/test-*.sh`, through `scripts/tests/run-all.sh`, which CI runs too
 - `npm run lint` - ESLint; CI adds `--max-warnings=0`
 - `npm run lint:py` - Ruff check and format check, pydoclint, function length,
   basedpyright
