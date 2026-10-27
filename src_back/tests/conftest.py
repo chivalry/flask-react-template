@@ -1,6 +1,7 @@
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from flask import Flask
@@ -42,6 +43,14 @@ class WidgetNote(BaseMixin, Base):
     body: Mapped[str | None] = mapped_column(String(255))
 
 
+class SpaTestClient(FlaskClient):
+    """Test client that sends X-Requested-With on every request, as the SPA does."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.environ_base['HTTP_X_REQUESTED_WITH'] = 'XMLHttpRequest'
+
+
 @pytest.fixture()
 def app(tmp_path: Path) -> Iterator[Flask]:
     app = create_app(
@@ -53,6 +62,9 @@ def app(tmp_path: Path) -> Iterator[Flask]:
             'UPLOAD_FOLDER': str(tmp_path / 'uploads'),
         }
     )
+    # Every client the tests build, app.test_client() included, marks its requests as
+    # the SPA's axios client does, which mutating API requests need.
+    app.test_client_class = SpaTestClient
     with app.app_context():
         _db.create_all()
         yield app

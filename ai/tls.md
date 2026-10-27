@@ -70,6 +70,29 @@ carry `__APP_NAME__` and `__REPO_DIR__` placeholders that are rendered at instal
 so several apps on one host get separate units, and their `OnFailure=` drop-ins merge
 instead of overwriting each other.
 
+## Security headers
+
+The HTTPS server in `scripts/nginx-ssl.conf.template` adds four headers to every
+response, nginx's own error pages included:
+
+- `Strict-Transport-Security: max-age=31536000`
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Content-Security-Policy: frame-ancestors 'none'`
+
+Only host nginx sends them. The frontend container's `docker/nginx.conf` sits behind it
+and adds none, so no header arrives twice. A location that sets an `add_header` of its
+own inherits none of the four and must repeat them.
+
+HSTS is a promise kept for a year: a browser that has seen it refuses plain HTTP to
+`$DOMAIN` and no longer lets a visitor click through a certificate error. An expired
+certificate then takes the site down for every returning visitor instead of showing a
+warning, which makes the monitoring above essential. Undoing HSTS needs a valid
+certificate too: serve `max-age=0` over HTTPS until every returning browser has seen
+it. The header leaves out `includeSubDomains`, which binds every subdomain, and
+`preload`, which asks browsers to build the rule in; both are slow to undo, so add them
+only once every subdomain serves HTTPS.
+
 ## Verifying
 
 ```bash
@@ -86,6 +109,8 @@ reloaded:
 ```bash
 echo | openssl s_client -connect $DOMAIN:443 \
   -servername $DOMAIN 2>/dev/null | openssl x509 -noout -dates
+curl -sI https://$DOMAIN/ |
+  grep -iE '^(strict-transport|x-content-type|referrer|content-security)'
 ```
 
 ## Manual recovery if a certificate has already expired

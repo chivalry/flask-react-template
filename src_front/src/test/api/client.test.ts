@@ -62,6 +62,10 @@ describe('api client', () => {
         expect(client.defaults.headers['Content-Type']).toBe('application/json')
     })
 
+    it('marks every request as an XMLHttpRequest for the CSRF check', () => {
+        expect(client.defaults.headers['X-Requested-With']).toBe('XMLHttpRequest')
+    })
+
     it('caps page size at the backend ceiling', () => {
         expect(MAX_PER_PAGE).toBe(100)
     })

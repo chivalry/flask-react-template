@@ -61,6 +61,17 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   Routes behind `@login_required` import `current_user` from `src_back/auth.py`, where
   it is typed as `User`; code that checks `is_authenticated` itself, such as
   `admin_required`, keeps Flask-Login's.
+- Every POST, PUT, PATCH, or DELETE to `/api` or `/uploads` must carry
+  `X-Requested-With: XMLHttpRequest`, which the axios client sends on every request;
+  `_require_requested_with_header` in `app.py` answers any other with 403. It is CSRF
+  defense in depth. SameSite cookies keep other sites' requests from carrying the
+  session, but a sibling subdomain counts as the same site, and an older browser may
+  ignore SameSite. A form cannot set a custom header, and a script on another origin
+  cannot send one without a CORS preflight, which only the origins in
+  `CORS_ALLOWED_ORIGINS` pass: production sets it to the site's own origin, while
+  development's `*` passes every origin. A route that must accept a cross-site POST,
+  such as Sign in with Apple's `form_post` callback (#30), must be exempted in that
+  hook and check its own `state` instead.
 - Accounts are deactivated, never deleted, so the rows that reference them stay
   intact. `complete_login` refuses a deactivated account with `InactiveAccountError`,
   and every caller checks the credential first, so the 403 never tells a stranger that
@@ -93,7 +104,8 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - All endpoints live under `/api`; versioned resources under `/api/v1/`.
 - `200` for GET and PUT, `201` for POST create, `204` for DELETE.
 - Errors are `{"error": "message"}` with `400`, `401`, `403`, `404`, `409`, `413`,
-  `422`, or `500`. Validation failures are `422`.
+  `422`, `429`, or `500`. Validation failures are `422`. Host nginx answers throttled
+  sign-in POSTs with `429` (`ai/auth.md`).
 - Paginated lists are `{"items": [...], "total", "page", "pages", "per_page"}`, with
   `per_page` capped at 100.
 - Image uploads go through `validate_image_file()`; stored files are served from
@@ -101,9 +113,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 
 ## Frontend
 
-- The axios client (`api/client.ts`) uses `baseURL: '/api'` and `withCredentials`.
-  Its interceptors copy the server's `error` text onto `error.message` and notify the
-  auth store on a 401.
+- The axios client (`api/client.ts`) uses `baseURL: '/api'`, `withCredentials`, and the
+  `X-Requested-With: XMLHttpRequest` header that the backend requires on every request
+  that changes data. Its interceptors copy the server's `error` text onto
+  `error.message` and notify the auth store on a 401.
 - The Zustand auth store holds the signed-in user. `fetchMe()` runs once on mount and
   `ProtectedRoute` waits for it; login and register store the user from their own
   response, as an admin's edit of their own account does from the update's, and a
@@ -174,6 +187,11 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   script needs Linux, as `backup.sh` does, or a tool is missing, says why and exits
   with status 77. `scripts/tests/run-all.sh` counts that as a skip locally and as a
   failure in CI, where every test must run.
+- A test that needs a real server or image, as `test-nginx-site.sh` and
+  `test-backend-image.sh` do, runs containers instead of stubs. It names every
+  container, image, and volume it creates after itself and its process id, removes
+  them however it exits, and exits 77 without a running Docker daemon or a tool it
+  needs.
 - Every script names its shell in a shebang (`#!/bin/sh`, `#!/bin/bash`, or
   `#!/usr/bin/env bash`). `run-all.sh` checks each one with `sh -n` or `bash -n` to
   match, and fails a `.sh` file without one. Tests are mode 644 and run as

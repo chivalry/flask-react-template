@@ -60,10 +60,11 @@ BACKUP
 
 # Each stub logs its call to $TEST_DIR/commands before it answers, so a refused call is
 # logged too, and reads its conditions from markers in $TEST_DIR/flags. docker finds a
-# volume while volume-<name> exists and accepts the Compose calls deploy.sh makes, but
-# the database does not answer pg_isready while db-down exists; git reports $COMMIT as
-# HEAD and pulls; curl cannot reach the backend while backend-down exists; nginx rejects
-# the configuration while nginx-invalid exists; systemctl and sleep only log.
+# volume while volume-<name> exists and fails the uploads chown while chown-fails
+# exists, and accepts the Compose calls deploy.sh makes, but the database does not
+# answer pg_isready while db-down exists; git reports $COMMIT as HEAD and pulls; curl
+# cannot reach the backend while backend-down exists; nginx rejects the configuration
+# while nginx-invalid exists; systemctl and sleep only log.
 cat > "$TEST_DIR/bin/mock-command" <<'MOCK'
 #!/usr/bin/env bash
 set -eu
@@ -77,6 +78,7 @@ case "$name" in
     case "$*" in
       'volume inspect '*) [ -f "$flags/volume-$3" ] || exit 1 ;;
       "$compose exec -T db pg_isready") [ ! -f "$flags/db-down" ] || exit 1 ;;
+      'run --rm -v '*) [ ! -f "$flags/chown-fails" ] || exit 1 ;;
       "$compose "*) ;;
       *) echo "Unexpected docker call: $*" >&2; exit 1 ;;
     esac
@@ -107,6 +109,15 @@ COMPOSE='docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml'
 COMPOSE+=' --env-file .env'
 TIMERS='flask-react-template-cert-check.timer flask-react-template-backup.timer'
 TIMERS+=' flask-react-template-restore-drill.timer'
+
+# deploy.sh hands the uploads volume to the uid the backend image runs as.
+IMAGE_UID=$(sed -n 's/.*useradd .*--uid \([0-9][0-9]*\).*/\1/p' \
+  "$REPO_DIR/docker/backend.Dockerfile")
+[ -n "$IMAGE_UID" ] ||
+  { echo 'docker/backend.Dockerfile gives useradd no --uid.' >&2; exit 1; }
+assert_line "$REPO_DIR/scripts/deploy.sh" "BACKEND_UID=$IMAGE_UID"
+CHOWN="docker run --rm -v $UPLOADS_VOLUME:/uploads alpine"
+CHOWN+=" chown -R $IMAGE_UID:$IMAGE_UID /uploads"
 
 # start_test_case [LINE...] -> a fresh start: the certificate, the stock nginx site, an
 # empty systemd directory, no flags, an empty command log, and a .env holding what
@@ -199,10 +210,10 @@ assert_units_installed() {
 }
 
 # A redeploy, with both data volumes present, starts the database for a pre-migration
-# dump labelled with the commit read before the pull, then rebuilds, waits for the
-# backend, installs the nginx site and the renewal hook, and enables the three timers
-# after one daemon-reload. Every call is listed, in order, so a step that moved or went
-# missing shows.
+# dump labelled with the commit read before the pull, hands the uploads volume to the
+# backend's user, then rebuilds, waits for the backend, installs the nginx site and the
+# renewal hook, and enables the three timers after one daemon-reload. Every call is
+# listed, in order, so a step that moved or went missing shows.
 start_test_case
 add_data_volumes
 run_deploy
@@ -215,6 +226,7 @@ expect_calls \
   "$COMPOSE up -d db" \
   "$COMPOSE exec -T db pg_isready" \
   "backup.sh --pre-migration --label $COMMIT" \
+  "$CHOWN" \
   "$COMPOSE down" \
   "$COMPOSE up -d --build --remove-orphans" \
   'curl -fsS http://127.0.0.1:5000/api/health' \
@@ -243,6 +255,8 @@ assert_contains "/var/log/$APP/restore-drill\.log" \
   "$SYSTEMD_DIR/$APP-alert-restore-drill.service"
 assert_contains 'example\.com' "$NGINX_DIR/sites-available/$APP"
 refute_contains '__[A-Z_]+__' "$NGINX_DIR/sites-available/$APP"
+# The rate-limit zone is named for the app, so apps sharing the host count apart.
+assert_contains "zone=$APP-auth:10m" "$NGINX_DIR/sites-available/$APP"
 [ "$(readlink "$NGINX_DIR/sites-enabled/$APP")" = "$NGINX_DIR/sites-available/$APP" ] ||
   { echo "sites-enabled/$APP does not link to the installed site." >&2; exit 1; }
 [ ! -e "$NGINX_DIR/sites-enabled/default" ] ||
@@ -280,6 +294,17 @@ assert_last_command "backup.sh --pre-migration --label $COMMIT"
 refute_contains 'down$' "$COMMANDS"
 refute_contains '--build' "$COMMANDS"
 refute_contains '^systemctl' "$COMMANDS"
+
+# A failed chown of the uploads volume stops the deploy before it takes the stack
+# down, so the old stack keeps serving.
+start_test_case
+add_data_volumes
+touch "$FLAGS/chown-fails"
+expect_failure 'a failed chown of the uploads volume to stop the deploy'
+assert_contains 'could not hand' "$OUTPUT"
+assert_last_command "$CHOWN"
+refute_contains 'down$' "$COMMANDS"
+refute_contains '--build' "$COMMANDS"
 
 # A missing certificate stops the deploy before it pulls or touches the stack.
 start_test_case

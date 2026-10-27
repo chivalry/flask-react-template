@@ -89,7 +89,9 @@ def test_abort_returns_json_error_envelope(app: Flask, status: int, message: str
     assert response.get_json() == {'error': message}
 
 
-def test_unhandled_exception_returns_json_internal_server_error(app: Flask) -> None:
+def test_unhandled_exception_returns_json_internal_server_error(
+    app: Flask, caplog: pytest.LogCaptureFixture
+) -> None:
     bp = Blueprint('server_error_trigger', __name__)
 
     @bp.get('/trigger-server-error')
@@ -98,9 +100,13 @@ def test_unhandled_exception_returns_json_internal_server_error(app: Flask) -> N
 
     app.register_blueprint(bp)
     app.config['PROPAGATE_EXCEPTIONS'] = False
-    response = app.test_client().get('/trigger-server-error')
+    with caplog.at_level(logging.ERROR, logger='src_back.app'):
+        response = app.test_client().get('/trigger-server-error')
     assert response.status_code == 500
     assert response.get_json() == {'error': 'Internal server error'}
+    # The exception's text goes to the log, never to the client.
+    assert b'deliberate failure' not in response.data
+    assert 'deliberate failure for the 500 handler' in caplog.text
 
 
 def test_validation_error_in_a_view_returns_json_unprocessable_entity(app: Flask) -> None:
@@ -129,6 +135,56 @@ def test_oversized_request_body_returns_json_file_too_large(
     assert response.get_json() == {
         'error': f'File is too large. Maximum size is {MAX_UPLOAD_MB} MB.'
     }
+
+
+@pytest.mark.parametrize('method', ['POST', 'PUT', 'PATCH', 'DELETE'])
+@pytest.mark.parametrize('path', ['/api', '/api/v1/auth/login', '/uploads/photo.png'])
+def test_mutating_request_without_requested_with_header_is_forbidden(
+    client: FlaskClient, method: str, path: str
+) -> None:
+    client.environ_base.pop('HTTP_X_REQUESTED_WITH')
+    response = client.open(path, method=method, json={})
+    assert response.status_code == 403
+    assert response.get_json() == {'error': 'Missing the X-Requested-With header.'}
+
+
+def test_sign_in_without_requested_with_header_starts_no_session(
+    client: FlaskClient, user: User
+) -> None:
+    client.environ_base.pop('HTTP_X_REQUESTED_WITH')
+    response = client.post(
+        '/api/v1/auth/login', json={'email': user.email, 'password': 'password123'}
+    )
+    assert response.status_code == 403
+    assert 'Set-Cookie' not in response.headers
+
+
+def test_requested_with_header_must_name_xmlhttprequest(client: FlaskClient) -> None:
+    response = client.post('/api/v1/auth/logout', headers={'X-Requested-With': 'fetch'})
+    assert response.status_code == 403
+
+
+def test_marked_mutating_request_reaches_its_route(client: FlaskClient) -> None:
+    # Anonymous, so logout's @login_required answers rather than the header check.
+    response = client.post('/api/v1/auth/logout')
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ('method', 'path', 'status'),
+    [
+        ('GET', '/api/health', 200),
+        ('OPTIONS', '/api/v1/auth/login', 200),
+        ('POST', '/api-docs', 405),
+        ('POST', '/some-client-route', 405),
+    ],
+)
+def test_safe_methods_and_spa_paths_need_no_requested_with_header(
+    client: FlaskClient, method: str, path: str, status: int
+) -> None:
+    client.environ_base.pop('HTTP_X_REQUESTED_WITH')
+    response = client.open(path, method=method)
+    assert response.status_code == status
 
 
 def test_user_loader_reloads_user_from_session(app: Flask, user: User) -> None:

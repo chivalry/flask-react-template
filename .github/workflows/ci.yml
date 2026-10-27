@@ -66,6 +66,12 @@ jobs:
           SECRET_KEY: ci-secret
         run: .venv/bin/python -m pytest
 
+      # Last, so a newly published advisory never hides the lint and test results.
+      # Only the runtime packages are audited: the development tools never reach the
+      # image.
+      - name: Audit runtime dependencies
+        run: .venv/bin/pip-audit -r requirements.txt
+
   fallow:
     name: Fallow duplication audit
     runs-on: ubuntu-latest
@@ -121,6 +127,11 @@ jobs:
       - name: Vitest with coverage
         run: npm run test:front
 
+      # Last, as in the backend job. devDependencies count too: Vite builds the bundle
+      # that ships, and every tool runs on developers' machines and here.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
   build:
     name: Production build
     runs-on: ubuntu-latest
@@ -151,7 +162,8 @@ jobs:
 
       # run-all.sh checks every script's syntax with the shell its shebang names, then
       # runs scripts/tests/. The Compose test renders the stacks with the runner's
-      # docker CLI and jq, and because Actions sets CI=true, a test that skips itself
-      # fails the step.
+      # docker CLI and jq, the nginx site and backend image tests run containers on its
+      # Docker daemon, and because Actions sets CI=true, a test that skips itself fails
+      # the step.
       - name: Shell script checks
         run: bash scripts/tests/run-all.sh

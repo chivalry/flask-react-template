@@ -35,6 +35,11 @@ to put new behavior in the right service.
   `BaseSchema`
 - `PNG_BYTES` - a minimal PNG for upload tests
 
+The `app` fixture sets `app.test_client_class` to `SpaTestClient`, so every client the
+tests build, `app.test_client()` included, sends `X-Requested-With: XMLHttpRequest` as
+the SPA does. To send a request without it, pop `HTTP_X_REQUESTED_WITH` from the
+client's `environ_base`.
+
 `src_back/tests/helpers.py` provides `persist(record)`, which adds a record, commits it,
 and returns it; use it instead of repeating those three lines.
 

@@ -22,12 +22,43 @@ on this groundwork:
 - Self-registration loads `RegistrationSchema`, which accepts only an email and a
   password: `role` or `is_active` in the body answers 422, so nobody registers as an
   admin. A registered account is an active `user`.
+- Every POST under `/api` must carry `X-Requested-With: XMLHttpRequest`
+  (`ai/conventions.md`). Sign in with Apple's `form_post` callback (#30) arrives as a
+  cross-site POST without it, so #30 must exempt that route and check its `state`
+  instead.
 
 An account without a password is trusted to own its email address, because only a
 sign-in provider that verified the address creates one. Any new way to create such an
 account, such as an invitation or a passkey-first sign-up, must verify the address
 first; otherwise linking a provider by email would hand the account to whoever
 created it.
+
+## Sign-in throttling
+
+In production, host nginx counts the POSTs each client address sends under
+`/api/v1/auth/`: six may arrive at once, then one more every six seconds, and nginx
+answers the rest with 429 and `{"error": "Too many attempts. Try again in a minute."}`
+(`scripts/nginx-ssl.conf.template`). GETs never count, so `/me`, which every page load
+sends, is never throttled. Development has no nginx and no limit.
+
+- Every POST under `/api/v1/auth/` shares the budget, including later ones such as the
+  passkey ceremonies (#32) and Sign in with Apple's callback (#30). A sign-in that
+  takes two POSTs leaves a user three attempts at once.
+- The limit keys on the address nginx sees. Behind a CDN or another proxy, that is the
+  proxy's address, so configure `real_ip_header` and `set_real_ip_from` first.
+- Each app on a host has its own zone, named for `APP_NAME`. The `map` that picks out
+  POSTs defines `$auth_post_client_address`, a name every site on the host shares, so
+  another site that defines it must define it the same way.
+
+To check it on the server, send eleven quick POSTs. The app answers the first six (422,
+for the empty body) and nginx the other five (429):
+
+```bash
+for i in $(seq 11); do
+  curl -s -o /dev/null -w '%{http_code} ' -X POST \
+    -H 'X-Requested-With: XMLHttpRequest' "https://$DOMAIN/api/v1/auth/login"
+done; echo
+```
 
 ## Deactivated accounts
 

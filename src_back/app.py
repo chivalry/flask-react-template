@@ -21,6 +21,7 @@ from werkzeug.exceptions import NotFound
 
 from src_back.extensions import db, login_manager, migrate
 from src_back.models import User
+from src_back.utils import ErrorResponse, forbidden
 
 load_dotenv()
 
@@ -34,6 +35,8 @@ _PLACEHOLDER_SECRET_KEYS = frozenset(
 )
 
 _JSON_PATH_PREFIXES = ('/api', '/uploads')
+
+_MUTATING_METHODS = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 
 _JSON_ERROR_MESSAGES = {
     400: 'Bad request',
@@ -94,6 +97,7 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
     _resolve_public_base_url(app)
     _initialize_extensions(app)
     _register_blueprints(app)
+    app.before_request(_require_requested_with_header)
     _register_error_handlers(app)
     _register_static_routes(app)
 
@@ -276,7 +280,7 @@ def _handle_validation_error(error: ValidationError) -> tuple[Response, int]:
 
 
 def _is_json_path(path: str) -> bool:
-    """Decide whether an unmatched path belongs to the API or the upload store.
+    """Decide whether a path belongs to the API or the upload store.
 
     Matching whole path segments keeps client routes that merely start with the
     same letters, such as ``/api-docs`` or ``/uploads-gallery``, on the SPA shell.
@@ -290,6 +294,28 @@ def _is_json_path(path: str) -> bool:
     return any(
         path == prefix or path.startswith(prefix + '/') for prefix in _JSON_PATH_PREFIXES
     )
+
+
+def _require_requested_with_header() -> ErrorResponse | None:
+    """Refuse a mutating API request that lacks the SPA's X-Requested-With header.
+
+    Defense in depth against cross-site request forgery, under the SameSite
+    session cookie: a form on another site cannot set the header, and a script on
+    another origin cannot send it without a CORS preflight that only the allowed
+    origins pass. ``ai/conventions.md`` explains when a route may be exempted.
+
+    Returns:
+        A 403 JSON error envelope for a POST, PUT, PATCH, or DELETE to an ``/api``
+        or ``/uploads`` path that lacks ``X-Requested-With: XMLHttpRequest``,
+        otherwise ``None``, which lets the request through.
+    """
+    if (
+        request.method in _MUTATING_METHODS
+        and _is_json_path(request.path)
+        and request.headers.get('X-Requested-With') != 'XMLHttpRequest'
+    ):
+        return forbidden('Missing the X-Requested-With header.')
+    return None
 
 
 def _register_error_handlers(app: Flask) -> None:
