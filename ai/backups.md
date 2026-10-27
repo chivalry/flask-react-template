@@ -232,11 +232,14 @@ as root:
       --clean --if-exists --no-owner < /tmp/<db-file>
     ```
 
-4. Restore uploads into the `<COMPOSE_PROJECT_NAME>_uploads_data` volume:
+4. Restore uploads into the `<COMPOSE_PROJECT_NAME>_uploads_data` volume. The `chown`
+   hands every file to the backend's unprivileged user (uid 10001), including files from
+   an archive made while the backend still ran as root, since an archive keeps each
+   file's numeric owner:
 
     ```bash
     docker run --rm -v <COMPOSE_PROJECT_NAME>_uploads_data:/to -v /tmp:/from alpine \
-      sh -c 'rm -rf /to/* && tar xzf /from/<up-file> -C /to'
+      sh -c 'rm -rf /to/* && tar xzf /from/<up-file> -C /to && chown -R 10001:10001 /to'
     ```
 
 5. Start the backend again:

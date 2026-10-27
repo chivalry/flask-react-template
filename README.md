@@ -119,6 +119,10 @@ The backend image installs only `requirements.txt`, the runtime packages, plus
 tools come from `requirements-dev.txt` and run from `.venv`, never inside the Compose
 containers.
 
+The backend runs as the unprivileged `app` user (uid 10001), never as root. Its source
+belongs to root in production, so the running app cannot change it; the dev image
+gives it to `app`, because file watch writes the synced files as that user.
+
 ## Worktrees
 
 To work on several branches at once, keep the clone as a bare-repo container with one
@@ -262,10 +266,24 @@ To remove a stored file, a service overrides `after_delete` and calls `delete_up
 also in `src_back/utils.py`, so the file goes only once the row's deletion is committed.
 A file that is already gone is ignored.
 
+The `app` user owns `src_back/uploads` in the backend image, and Docker gives a new,
+empty `uploads_data` volume that owner. Docker never re-owns a volume that already holds
+files, so one written while the backend ran as root keeps root as its owner, and saving
+an upload then fails with a 500. `scripts/deploy.sh` hands the volume to the app user on
+every redeploy; in development, hand it over once yourself, naming the volume after
+`COMPOSE_PROJECT_NAME`:
+
+```bash
+docker run --rm -v <COMPOSE_PROJECT_NAME>_uploads_data:/uploads alpine \
+  chown -R 10001:10001 /uploads
+```
+
 ## Deployment
 
 The production stack runs on one Ubuntu host behind host nginx with Let's Encrypt.
-Database and backend ports are bound to loopback; only nginx faces the network.
+Database and backend ports are bound to loopback; only nginx faces the network. Host
+nginx also sends the security headers and throttles sign-in attempts; `ai/tls.md` and
+`ai/auth.md` describe both.
 
 On the server:
 
@@ -278,9 +296,10 @@ bash scripts/certbot-setup.sh --email you@example.com  # first certificate, afte
 `provision.sh` writes `.env` with generated secrets; review it before deploying.
 
 Then, from your machine, `DEPLOY_HOST=root@example.com npm run deploy`.
-`scripts/deploy.sh` backs up the database before migrating, rebuilds the containers,
-installs the nginx site, and enables certificate monitoring, nightly backups kept on the
-server, and a weekly drill that restores the newest one. Once the `SPACES_*` variables
-are filled in, `bash scripts/install-backup.sh` adds off-site copies in a bucket.
+`scripts/deploy.sh` backs up the database before migrating, hands the uploads volume to
+the backend's unprivileged user, rebuilds the containers, installs the nginx site, and
+enables certificate monitoring, nightly backups kept on the server, and a weekly drill
+that restores the newest one. Once the `SPACES_*` variables are filled in,
+`bash scripts/install-backup.sh` adds off-site copies in a bucket.
 Failures alert through `ALERT_WEBHOOK_URL`; `ai/backups.md` and `ai/tls.md` cover
 restores, alerts, and renewals.

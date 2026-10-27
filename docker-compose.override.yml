@@ -14,6 +14,9 @@ services:
         # Flask's reloader switches to watchdog once it is installed, so modules being
         # added and deleted reload the backend too. See docker/backend.Dockerfile.
         DEVELOPMENT_PACKAGES: watchdog==6.0.0
+        # File watch writes and deletes the synced files as the container's user, so the
+        # dev image gives the source to the app user; production keeps it root's.
+        SOURCE_OWNER: app
     develop:
       watch:
         # Flask's reloader, started by docker/entrypoint.sh, picks these up.

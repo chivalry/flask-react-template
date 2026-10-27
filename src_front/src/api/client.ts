@@ -2,9 +2,11 @@
  * @file Shared axios instance for every API call, plus list-paging helpers.
  *
  * `withCredentials` is what carries the Flask session cookie, so authenticated
- * requests work without any token handling in the client. Two response
- * interceptors run on every failure: one copies the backend's `{ error }` text
- * into `error.message`, the other reports a lost session to whoever registered
+ * requests work without any token handling in the client. Every request also sends
+ * `X-Requested-With: XMLHttpRequest`, which the backend requires on any request that
+ * changes data: a form on another site cannot set it, so a forged request fails.
+ * Two response interceptors run on every failure: one copies the backend's `{ error }`
+ * text into `error.message`, the other reports a lost session to whoever registered
  * through {@link setUnauthorizedHandler}.
  */
 
@@ -29,6 +31,7 @@ const client = axios.create({
     withCredentials: true,
     headers: {
         'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
     },
 })
 

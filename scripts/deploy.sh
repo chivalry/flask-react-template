@@ -7,11 +7,11 @@
 #
 # Steps: pre-flight checks (Compose project + data volumes, certificate present),
 # git pull, pre-migration database backup named for the commit that was running
-# (starting the database first if the stack is stopped), rebuild and restart the
-# stack, wait for the backend to report healthy (its entrypoint runs the migrations
-# and the seed before gunicorn starts), install the nginx site, the certbot deploy
-# hook, and the systemd units: certificate monitoring, the daily backup, and the
-# weekly restore drill.
+# (starting the database first if the stack is stopped), hand the uploads volume to the
+# backend's unprivileged user, rebuild and restart the stack, wait for the backend to
+# report healthy (its entrypoint runs the migrations and the seed before gunicorn
+# starts), install the nginx site, the certbot deploy hook, and the systemd units:
+# certificate monitoring, the daily backup, and the weekly restore drill.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,6 +47,9 @@ FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-8080}"
 LOG_DIR="/var/log/$APP_NAME"
 NGINX_SITE="$APP_NAME"
 CERT_DIR="/etc/letsencrypt/live/$DOMAIN"
+# The uid the backend image runs as (docker/backend.Dockerfile's useradd --uid);
+# scripts/tests/test-deploy.sh checks that the two agree.
+BACKEND_UID=10001
 
 compose() {
   docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml \
@@ -136,6 +139,20 @@ else
   echo "==> First deploy: no database to back up yet."
 fi
 
+# Docker gives a new, empty uploads volume to the backend's user, but never re-owns
+# one that already holds files: files written while the backend ran as root, or
+# restored from an older archive. Saving an upload would then fail while
+# /api/health stays healthy. This runs before the stack goes down, so a failure
+# leaves the old stack serving.
+if [ "$FIRST_DEPLOY" = 0 ]; then
+  echo "==> Handing the uploads volume to the backend's user..."
+  if ! docker run --rm -v "$UPLOADS_VOLUME:/uploads" alpine \
+    chown -R "$BACKEND_UID:$BACKEND_UID" /uploads; then
+    echo "ERROR: could not hand $UPLOADS_VOLUME to uid $BACKEND_UID."
+    exit 1
+  fi
+fi
+
 echo "==> Stopping existing containers..."
 compose down
 
@@ -151,7 +168,7 @@ wait_for_backend
 
 echo "==> Installing nginx site config ($NGINX_SITE)..."
 rm -f /etc/nginx/sites-enabled/default
-sed -e "s|__DOMAIN__|$DOMAIN|g" \
+sed -e "s|__APP_NAME__|$APP_NAME|g" -e "s|__DOMAIN__|$DOMAIN|g" \
   -e "s|__BACKEND_PORT__|$BACKEND_PORT|g" \
   -e "s|__FRONTEND_HOST_PORT__|$FRONTEND_HOST_PORT|g" \
   scripts/nginx-ssl.conf.template > "/etc/nginx/sites-available/$NGINX_SITE"

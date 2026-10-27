@@ -1,5 +1,11 @@
 FROM python:3.12-slim
 
+# The app runs as this unprivileged account, never as root. Fixed ids keep the owner of
+# the files it writes to the uploads volume the same across rebuilds, and
+# scripts/deploy.sh hands that volume to the same uid (BACKEND_UID).
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --no-log-init --uid 10001 --gid app app
+
 WORKDIR /app
 
 COPY requirements.txt .
@@ -16,6 +22,21 @@ RUN if [ -n "$DEVELOPMENT_PACKAGES" ]; then \
 COPY src_back/ ./src_back/
 COPY migrations/ ./migrations/
 COPY docker/entrypoint.sh docker/entrypoint.sh
+
+# The uploads_data volume mounts here. Docker gives a new, empty volume this directory's
+# owner; scripts/deploy.sh hands over one that already holds files.
+RUN install -d -o app -g app src_back/uploads
+
+# Production leaves the source owned by root, so the process serving it cannot change
+# it. The dev stack builds with SOURCE_OWNER=app (docker-compose.override.yml), because
+# Compose's file watch writes and deletes files, and creates them in every synced
+# directory, as the container's user.
+ARG SOURCE_OWNER=root
+RUN if [ "$SOURCE_OWNER" != root ]; then \
+      chown -R "$SOURCE_OWNER:$SOURCE_OWNER" src_back migrations docker; \
+    fi
+
+USER app
 
 EXPOSE 5000
 

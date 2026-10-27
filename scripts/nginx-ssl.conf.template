@@ -1,7 +1,19 @@
-# Host nginx site for the production stack. scripts/deploy.sh renders __DOMAIN__,
-# __BACKEND_PORT__, and __FRONTEND_HOST_PORT__ from .env and installs the result as
-# /etc/nginx/sites-available/<APP_NAME>. Do not edit the installed copy; it is
-# overwritten on every deploy.
+# Host nginx site for the production stack. scripts/deploy.sh renders __APP_NAME__,
+# __DOMAIN__, __BACKEND_PORT__, and __FRONTEND_HOST_PORT__ from .env and installs the
+# result as /etc/nginx/sites-available/<APP_NAME>. Do not edit the installed copy; it is
+# overwritten on every deploy. scripts/tests/test-nginx-site.sh runs it in a real nginx.
+
+# Sign-in throttling for the /api/v1/auth/ location below. Only a POST gets a key, and
+# nginx does not count a request whose key is empty, so GET /api/v1/auth/me, which
+# every page load sends, is never throttled. Every site on the host shares nginx's
+# variable names, so another site that defines this map must define it the same way;
+# the zone is named for the app, so each app counts its own attempts.
+map $request_method $auth_post_client_address {
+    POST    $binary_remote_addr;
+    default '';
+}
+limit_req_zone $auth_post_client_address zone=__APP_NAME__-auth:10m rate=10r/m;
+
 server {
     listen 80;
     server_name __DOMAIN__;
@@ -17,6 +29,14 @@ server {
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
 
+    # Every response carries these, nginx's own error pages included (always). A
+    # location with an add_header of its own inherits none of them and must repeat all
+    # four. deploy.sh refuses to run without the certificate, so HSTS is safe here.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "frame-ancestors 'none'" always;
+
     client_max_body_size 25m;
 
     # nginx rejects oversized bodies itself; answer with the application's JSON 413
@@ -26,6 +46,26 @@ server {
     location @payload_too_large {
         default_type application/json;
         return 413 '{"error": "File is too large. Maximum size is 25 MB."}';
+    }
+
+    # Throttled sign-in attempts get the application's JSON envelope as well.
+    error_page 429 = @too_many_requests;
+    location @too_many_requests {
+        default_type application/json;
+        return 429 '{"error": "Too many attempts. Try again in a minute."}';
+    }
+
+    # Sign-in POSTs: six at once per client address (one plus a burst of five), then
+    # one more every six seconds, and 429 beyond that. ^~ keeps the /api regex below
+    # from claiming these paths.
+    location ^~ /api/v1/auth/ {
+        limit_req zone=__APP_NAME__-auth burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:__BACKEND_PORT__;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     # Whole-segment match, like the Flask 404 handler and the Vite proxy: bare

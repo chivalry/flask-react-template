@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Render the development and production Compose configurations and check that only the
-# development stack carries file watch and watchdog, that every watched path exists and
-# migrations sync without restarting the backend, and what the production stack must
-# keep: loopback-only ports and no database port; a backend that runs
+# development stack carries file watch, watchdog, and backend source owned by the app
+# user, that every watched path exists and migrations sync without restarting the
+# backend, that neither stack overrides the image's user, and what the production stack
+# must keep: loopback-only ports and no database port; a backend that runs
 # docker/entrypoint.sh under FLASK_ENV=production, where it starts gunicorn, with
 # GUNICORN_WORKERS and secure session cookies; and the nginx frontend. It needs the
 # docker CLI with Compose, and jq, but no daemon; without them it exits 77, which
@@ -53,6 +54,9 @@ check dev '.services.backend.develop.watch | length > 0' 'backend file watch'
 check dev '.services.frontend.develop.watch | length > 0' 'frontend file watch'
 check dev '.services.backend.build.args.DEVELOPMENT_PACKAGES | test("^watchdog==")' \
   'watchdog in the backend build'
+# File watch writes the synced files as the container's user, the app user.
+check dev '.services.backend.build.args.SOURCE_OWNER == "app"' \
+  'backend source owned by the app user'
 # A restart runs the entrypoint's db upgrade, which would apply an unreviewed revision.
 check dev '[.services.backend.develop.watch[] | select(.target == "/app/migrations")
   | .action] == ["sync"]' 'migrations synced without a restart'
@@ -75,6 +79,13 @@ check prod '.services.backend.entrypoint == ["/bin/sh", "docker/entrypoint.sh"]'
 check prod '[.services[] | has("develop")] | any | not' 'no file watch'
 check prod '(.services.backend.build.args.DEVELOPMENT_PACKAGES // "") == ""' \
   'no development packages in the backend build'
+check prod '(.services.backend.build.args.SOURCE_OWNER // "") == ""' \
+  'backend source left to root'
+# The backend runs as the image's unprivileged user (docker/backend.Dockerfile).
+for stack in dev prod; do
+  check "$stack" '.services.backend | has("user") | not' \
+    'no user override on the backend'
+done
 check prod '[.. | strings | select(test("--reload|flask run"))] | length == 0' \
   'no reload flag or development server command'
 check prod '.services.backend.environment.GUNICORN_WORKERS == "4"' \

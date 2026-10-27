@@ -18,8 +18,8 @@ only explains what each one is for.
   through the system interpreter.
 - **Node.js 22 and npm**: run the frontend toolchain: Vite, Vitest, ESLint, Prettier,
   and the rest of `package.json`. The frontend images build on `node:22-slim`, CI and
-  the dev container pin 22, and `npm ci` installs exactly what `package-lock.json`
-  records.
+  the dev container pin 22, `.node-version` asks version managers such as fnm for 22,
+  and `npm ci` installs exactly what `package-lock.json` records.
 - **TypeScript**: the frontend language, compiled by Vite and checked by `tsc -b` over
   three project references: the app, `vite.config.ts`, and the tests.
 - **Bash and POSIX sh**: the scripts. `docker/entrypoint.sh` and the local helpers
@@ -89,7 +89,8 @@ watchdog, which only the dev stack's backend image gets.
 ## Backend quality and test tools
 
 Installed from `requirements-dev.txt` into `.venv` only; the backend image never has
-them. `npm run lint:py` and `npm run test:back` run them, as do lint-staged and CI.
+them. `npm run lint:py` and `npm run test:back` run them, as do lint-staged and CI,
+except pip-audit, which only CI and a manual run use.
 
 - **Ruff**: lints and formats the Python code. `pyproject.toml` selects the
   pycodestyle, Pyflakes, isort, pyupgrade, and pydocstyle rules with Google-style
@@ -108,6 +109,9 @@ them. `npm run lint:py` and `npm run test:back` run them, as do lint-staged and 
   `conftest.py` build the app on an in-memory database and sign in test clients.
 - **pytest-cov**: measures coverage with coverage.py and fails the run under 100%, the
   gate `pyproject.toml` sets with `--cov-fail-under=100`.
+- **pip-audit**: checks the packages in `requirements.txt`, and those they pull in,
+  against PyPI's vulnerability data. CI's backend job fails on any known vulnerability;
+  run it locally with `.venv/bin/pip-audit -r requirements.txt`.
 
 ## Frontend runtime libraries
 
@@ -215,11 +219,16 @@ The `devDependencies` in `package.json`.
 - **`scripts/tests/`**: Bash tests. Each `test-<script>.sh` runs its script against
   stub commands such as `docker`, `lsof`, `rclone`, `systemctl`, and `sudo`, which log
   their calls instead of acting, and checks the log and the files the script wrote;
-  `test-compose-config.sh` checks the rendered Compose stacks instead. `run-all.sh`
+  `test-compose-config.sh` checks the rendered Compose stacks instead, and
+  `test-nginx-site.sh` and `test-backend-image.sh` run real containers. `run-all.sh`
   first checks every script's syntax with `bash -n` or `sh -n`, as its shebang names.
 - **jq**: `test-compose-config.sh` queries the JSON that `docker compose config`
   renders for each stack with it. The CI runner has it; locally, the test skips
   without it or without the docker CLI.
+- **Docker daemon, curl, and openssl**: `test-nginx-site.sh` runs the host site template,
+  rendered for two apps, in `nginx:1.27-alpine` with throwaway certificates and sends it
+  requests with curl; `test-backend-image.sh` builds the backend image and runs it beside
+  `alpine`. The CI runner has all three; locally, each test skips without them.
 
 ## Containers and images
 
@@ -241,12 +250,14 @@ The `devDependencies` in `package.json`.
   platform.
 - **`python:3.12-slim`**: the backend image base. It installs only `requirements.txt`,
   plus watchdog when the dev stack builds it, so the image carries no lint, type-check,
-  or test tools.
+  or test tools. It runs the app as the unprivileged `app` user, uid 10001.
 - **`node:22-slim`**: the development frontend image, which runs the Vite dev server,
   and the build stage of the production frontend image.
 - **`nginx:1.27-alpine`**: the production frontend image. `docker/nginx.conf` serves
   the built bundle, falls back to `index.html` for client routes, proxies `/api` and
   `/uploads` to the backend, and answers oversized uploads with the app's JSON 413.
+  Host nginx sits in front of it and sends the security headers, so it adds none.
+  `test-nginx-site.sh` runs the host site in this image too.
 - **`postgres:16`**: the database image, with a `pg_isready` health check the backend
   waits on before it starts. CI runs the same image as a service container. The weekly
   restore drill restores the newest backup into a scratch container of the same image,
@@ -254,16 +265,18 @@ The `devDependencies` in `package.json`.
   tag.
 - **`alpine`**: the throwaway container `scripts/backup.sh` mounts the uploads volume
   into to archive it; the restore steps in `ai/backups.md` use it the same way.
+  `scripts/deploy.sh` uses it to hand the uploads volume to the backend's user, and
+  `test-backend-image.sh` to stand in for an old volume.
 
 ## GitHub
 
 - **GitHub Actions**: CI, in `.github/workflows/ci.yml`, on every push and pull
   request, and on demand from the Actions tab. Its five jobs cover the backend (Ruff,
-  pydoclint, the function-length check, basedpyright, and pytest against a PostgreSQL
-  service), the fallow audit against the base branch, the frontend (ESLint, Prettier,
-  markdownlint, and Vitest), the production build, and the shell scripts (syntax checks
-  and `scripts/tests/`). `assign-issues.yml` assigns each new issue to the repository
-  owner through `actions/github-script`.
+  pydoclint, the function-length check, basedpyright, pytest against a PostgreSQL service,
+  and pip-audit), the fallow audit against the base branch, the frontend (ESLint,
+  Prettier, markdownlint, Vitest, and `npm audit` at high severity), the production build,
+  and the shell scripts (syntax checks and `scripts/tests/`). `assign-issues.yml` assigns
+  each new issue to the repository owner through `actions/github-script`.
 - **Reusable actions**: `actions/checkout`, `actions/setup-python` with a pip cache
   keyed on both requirements files, `actions/setup-node` with the npm cache, and
   `actions/github-script`.
@@ -282,9 +295,10 @@ backup, and restore-drill units.
 - **Ubuntu**: the production server's operating system. `scripts/provision.sh`
   installs every package with apt.
 - **Host nginx**: the reverse proxy in front of the stack. The site rendered from
-  `scripts/nginx-ssl.conf.template` redirects HTTP to HTTPS, terminates TLS, and
-  proxies to the loopback ports Compose publishes; every deploy rewrites it. nginx
-  arrives as a dependency of `python3-certbot-nginx`.
+  `scripts/nginx-ssl.conf.template` redirects HTTP to HTTPS, terminates TLS, sends the
+  security headers, throttles sign-in POSTs, and proxies to the loopback ports Compose
+  publishes; every deploy rewrites it. nginx arrives as a dependency of
+  `python3-certbot-nginx`.
 - **Certbot and Let's Encrypt**: issue and renew the certificate. The first issuance
   uses the standalone authenticator; the renewal config is then switched to the nginx
   authenticator from `python3-certbot-nginx`, because standalone cannot bind port 80

@@ -6,3 +6,4 @@ pydoclint==0.9.1
 basedpyright==1.39.9
 pytest==8.3.5
 pytest-cov==6.1.0
+pip-audit==2.10.1
