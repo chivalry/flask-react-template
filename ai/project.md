@@ -50,7 +50,8 @@ that every contributor and agent follows.
 
 All commands run from the repo root via npm scripts. Python tooling always goes through
 `.venv/bin/`, installed from `requirements-dev.txt`; `requirements.txt` holds only the
-runtime packages and is the file `docker/backend.Dockerfile` installs.
+runtime packages and is the file `docker/backend.Dockerfile` installs, adding `watchdog`
+for the reloader only when the dev stack builds it.
 
 - `npm run test` - frontend and backend suites in parallel, both with coverage
 - `npm run test:back` - `.venv/bin/python -m pytest` (100% coverage enforced)
@@ -64,7 +65,10 @@ runtime packages and is the file `docker/backend.Dockerfile` installs.
 - `npm run typecheck` - `tsc -b`
 - `npm run format` and `npm run format:py` - Prettier and Ruff format
 - `npm run fallow` - duplication and dead-code audit of the frontend
-- `npm run docker:up` - start the dev stack, assigning free ports into `.env`
+- `npm run docker:up` - build and start the dev stack, assigning free ports into `.env`,
+  then watch it (`develop.watch` in `docker-compose.override.yml`) so saved edits reach
+  the running containers. It stays attached, so an agent runs it as a background
+  command; `npm run docker:up -- -d` starts detached and does not watch
 - `npm run docker:url` - wait for the dev frontend and print its URL
 - `npm run docker:seed` - run the seed inside the backend container
 - `npm run docker:down` - stop the dev stack
@@ -89,11 +93,16 @@ runtime packages and is the file `docker/backend.Dockerfile` installs.
   PostgreSQL.
 - `docker/entrypoint.sh` owns migrations: it runs `db upgrade` and the seed on every
   container start, in development and in production, and a non-zero exit stops the
-  container. Seeds skip optional work themselves instead of failing. `scripts/deploy.sh`
+  container. Seeds skip optional work themselves instead of failing. It then starts
+  gunicorn, or, under `FLASK_ENV=development`, Flask's development server with the
+  reloader and without the debugger; the dev build installs `watchdog`, so the reloader
+  also sees added and deleted modules. The dev stack syncs `migrations/` into the
+  backend without restarting its container, so a generated revision is applied by
+  `db upgrade` or at the next backend start, never by the sync. `scripts/deploy.sh`
   never runs `db upgrade` itself; it takes a database backup, restarts the stack, and
-  waits for `/api/health`, which the backend serves only after the entrypoint finishes.
-  This assumes one backend container; scaling it out means moving migrations into the
-  deploy step.
+  waits for `/api/health`, which the backend serves only after the entrypoint
+  finishes. This assumes one backend container; scaling it out means moving
+  migrations into the deploy step.
 - Run `flask` inside the container or through the venv, never with the system Python:
   `docker compose exec -T backend flask --app src_back.app db upgrade` or
   `.venv/bin/flask --app src_back.app ...`.

@@ -1,0 +1,62 @@
+# Development only. Compose merges this file onto docker-compose.yml whenever no -f is
+# given, as in scripts/up.sh and the docker:* npm scripts other than docker:prod:*. The
+# production stack always passes -f, so it never loads it.
+#
+# `docker compose up --watch` (scripts/up.sh's default, which needs Compose 2.24.7 or
+# newer) applies these rules: sync copies saved and deleted files into the running
+# container, sync+restart also restarts it, and rebuild builds the image and replaces
+# the container. The build context's .dockerignore applies too, so caches, coverage
+# reports, and local uploads stay out.
+services:
+  backend:
+    build:
+      args:
+        # Flask's reloader switches to watchdog once it is installed, so modules being
+        # added and deleted reload the backend too. See docker/backend.Dockerfile.
+        DEVELOPMENT_PACKAGES: watchdog==6.0.0
+    develop:
+      watch:
+        # Flask's reloader, started by docker/entrypoint.sh, picks these up.
+        - action: sync
+          path: ./src_back
+          target: /app/src_back
+        # No restart: a restart runs db upgrade, and a new revision waits for review.
+        - action: sync
+          path: ./migrations
+          target: /app/migrations
+        - action: sync+restart
+          path: ./docker/entrypoint.sh
+          target: /app/docker/entrypoint.sh
+        - action: rebuild
+          path: ./requirements.txt
+        - action: rebuild
+          path: ./docker/backend.Dockerfile
+
+  frontend:
+    develop:
+      watch:
+        # Vite's dev server picks these up and updates the page through HMR.
+        - action: sync
+          path: ./src_front
+          target: /app/src_front
+        - action: sync+restart
+          path: ./vite.config.ts
+          target: /app/vite.config.ts
+        - action: sync+restart
+          path: ./tsconfig.json
+          target: /app/tsconfig.json
+        - action: sync+restart
+          path: ./tsconfig.app.json
+          target: /app/tsconfig.app.json
+        - action: sync+restart
+          path: ./tsconfig.node.json
+          target: /app/tsconfig.node.json
+        - action: sync+restart
+          path: ./tsconfig.test.json
+          target: /app/tsconfig.test.json
+        - action: rebuild
+          path: ./package.json
+        - action: rebuild
+          path: ./package-lock.json
+        - action: rebuild
+          path: ./docker/frontend.Dockerfile

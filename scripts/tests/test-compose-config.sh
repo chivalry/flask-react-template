@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Render the development and production Compose configurations and check what the
-# production stack must keep: loopback-only ports and no database port, a production
-# backend with GUNICORN_WORKERS and secure session cookies, and the nginx frontend. It
-# needs the docker CLI with Compose, and jq, but no daemon; without them it exits 77,
-# which scripts/tests/run-all.sh counts as a skip outside CI. It runs under macOS's
-# bash 3.2 and on Linux.
+# Render the development and production Compose configurations and check that only the
+# development stack carries file watch and watchdog, that every watched path exists and
+# migrations sync without restarting the backend, and what the production stack must
+# keep: loopback-only ports and no database port; a backend that runs
+# docker/entrypoint.sh under FLASK_ENV=production, where it starts gunicorn, with
+# GUNICORN_WORKERS and secure session cookies; and the nginx frontend. It needs the
+# docker CLI with Compose, and jq, but no daemon; without them it exits 77, which
+# scripts/tests/run-all.sh counts as a skip outside CI. It runs under macOS's bash 3.2
+# and on Linux.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 if ! docker compose version > /dev/null 2>&1 || ! command -v jq > /dev/null; then
@@ -46,6 +49,18 @@ check dev '.services.backend.environment.FLASK_ENV == "development"' \
   'a development backend'
 check dev '.services.frontend.build.dockerfile == "docker/frontend.Dockerfile"' \
   'the Vite dev server as its frontend'
+check dev '.services.backend.develop.watch | length > 0' 'backend file watch'
+check dev '.services.frontend.develop.watch | length > 0' 'frontend file watch'
+check dev '.services.backend.build.args.DEVELOPMENT_PACKAGES | test("^watchdog==")' \
+  'watchdog in the backend build'
+# A restart runs the entrypoint's db upgrade, which would apply an unreviewed revision.
+check dev '[.services.backend.develop.watch[] | select(.target == "/app/migrations")
+  | .action] == ["sync"]' 'migrations synced without a restart'
+# A watch path that does not exist, such as a renamed tsconfig file, watches nothing.
+jq -r '.services[].develop.watch[]?.path' "$TEST_DIR/dev.json" > "$TEST_DIR/watch-paths"
+while IFS= read -r path; do
+  [ -e "$path" ] || { echo "The dev watch path $path does not exist." >&2; exit 1; }
+done < "$TEST_DIR/watch-paths"
 # A port without host_ip binds every interface, as 0.0.0.0 does. The count keeps the
 # loopback check from passing on a stack that publishes nothing.
 check prod '[.services[].ports[]?] | length > 0' 'published ports'
@@ -54,6 +69,14 @@ check prod '[.services[].ports[]? | .host_ip == "127.0.0.1"] | all' \
 check prod '(.services.db.ports // []) | length == 0' 'no published database port'
 check prod '.services.backend.environment.FLASK_ENV == "production"' \
   'a production backend'
+# Under FLASK_ENV=production the entrypoint starts gunicorn (test-entrypoint.sh).
+check prod '.services.backend.entrypoint == ["/bin/sh", "docker/entrypoint.sh"]' \
+  'docker/entrypoint.sh as the backend entrypoint'
+check prod '[.services[] | has("develop")] | any | not' 'no file watch'
+check prod '(.services.backend.build.args.DEVELOPMENT_PACKAGES // "") == ""' \
+  'no development packages in the backend build'
+check prod '[.. | strings | select(test("--reload|flask run"))] | length == 0' \
+  'no reload flag or development server command'
 check prod '.services.backend.environment.GUNICORN_WORKERS == "4"' \
   'GUNICORN_WORKERS, 4 by default'
 check prod-workers '.services.backend.environment.GUNICORN_WORKERS == "3"' \

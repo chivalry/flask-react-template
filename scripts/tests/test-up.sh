@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Exercise scripts/up.sh's port assignment, its already-running path, and its
-# production path with stub docker and lsof commands. It runs under macOS's bash 3.2
-# and on Linux in CI, so it avoids bash 4 features.
+# Exercise scripts/up.sh's port assignment, its watched and detached starts, its
+# already-running path, and its production path with stub docker and lsof commands. It
+# runs under macOS's bash 3.2 and on Linux in CI, so it avoids bash 4 features.
 set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_DIR=$(mktemp -d)
@@ -65,7 +65,8 @@ refute_contains() {
 }
 
 # A first start writes .env from the example, moves a busy database port, and points
-# DATABASE_URL at the new one; the free ports keep the example's values.
+# DATABASE_URL at the new one; the free ports keep the example's values. It then builds
+# and watches.
 set_busy_ports 5432
 run_up
 assert_contains '^DB_PORT=5433$' "$ENV_FILE"
@@ -76,7 +77,8 @@ assert_contains '^FRONTEND_PORT=5174$' "$ENV_FILE"
 assert_contains '^PUBLIC_BASE_URL=http://localhost:5174$' "$ENV_FILE"
 assert_contains 'Port assignment:' "$OUTPUT"
 assert_contains '^docker compose ps -q$' "$COMMANDS"
-assert_contains '^docker compose up$' "$COMMANDS"
+assert_contains '^docker compose up --build --watch$' "$COMMANDS"
+refute_contains 'not watching' "$OUTPUT"
 
 # Busy backend and frontend ports carry VITE_API_URL and PUBLIC_BASE_URL with them, and
 # PUBLIC_BASE_URL keeps its trailing slash.
@@ -110,7 +112,7 @@ assert_contains '^VITE_API_URL=http://localhost:5000$' "$ENV_FILE"
 assert_contains '^PUBLIC_BASE_URL=http://localhost:5174$' "$ENV_FILE"
 
 # Ports start from .env, so a worktree's shifted ports stay while they are free, and
-# up.sh hands its arguments to docker compose up.
+# up.sh hands its arguments to docker compose up after its own flags.
 sed -e 's/^DB_PORT=.*/DB_PORT=5442/' -e 's/^BACKEND_PORT=.*/BACKEND_PORT=5010/' \
   -e 's/^FRONTEND_PORT=.*/FRONTEND_PORT=5184/' "$EXAMPLE" > "$ENV_FILE"
 set_busy_ports
@@ -120,10 +122,24 @@ assert_contains '^DATABASE_URL=postgresql://app:app@localhost:5442/app$' "$ENV_F
 assert_contains '^BACKEND_PORT=5010$' "$ENV_FILE"
 assert_contains '^FRONTEND_PORT=5184$' "$ENV_FILE"
 assert_contains '^PUBLIC_BASE_URL=http://localhost:5184$' "$ENV_FILE"
-assert_contains '^docker compose up -d backend$' "$COMMANDS"
+assert_contains '^docker compose up --build -d backend$' "$COMMANDS"
 
-# A running stack keeps the ports in .env, even one that now looks busy, and still
-# starts.
+# A watched start passes its arguments after the development flags too.
+run_up backend
+assert_contains '^docker compose up --build --watch backend$' "$COMMANDS"
+refute_contains 'not watching' "$OUTPUT"
+
+# A detached start builds, cannot watch, says so, and names the command that watches.
+for flag in -d --detach --wait; do
+  run_up "$flag"
+  assert_contains "^docker compose up --build $flag\$" "$COMMANDS"
+  refute_contains '--watch' "$COMMANDS"
+  assert_contains 'not watching' "$OUTPUT"
+  assert_contains 'docker compose watch --no-up' "$OUTPUT"
+done
+
+# A running stack keeps the ports in .env, even one that now looks busy, and is still
+# built and watched.
 cp "$EXAMPLE" "$ENV_FILE"
 cp "$ENV_FILE" "$TEST_DIR/before.env"
 set_busy_ports 5000
@@ -133,10 +149,11 @@ cmp -s "$TEST_DIR/before.env" "$ENV_FILE" ||
   { echo 'up.sh rewrote .env while the stack was running.' >&2; exit 1; }
 assert_contains 'Stack already running; keeping the ports in \.env\.' "$OUTPUT"
 refute_contains 'Port assignment' "$OUTPUT"
-assert_contains '^docker compose up$' "$COMMANDS"
+assert_contains '^docker compose up --build --watch$' "$COMMANDS"
 rm "$TEST_DIR/running"
 
-# Production assigns no ports, even with one busy, and starts as asked.
+# Production assigns no ports, even with one busy, and starts as asked, attached or
+# detached, with neither a build nor a watch.
 sed 's/^FLASK_ENV=.*/FLASK_ENV=production/' "$EXAMPLE" > "$ENV_FILE"
 cp "$ENV_FILE" "$TEST_DIR/before.env"
 set_busy_ports 5432
@@ -145,5 +162,10 @@ cmp -s "$TEST_DIR/before.env" "$ENV_FILE" ||
   { echo 'up.sh rewrote .env in production.' >&2; exit 1; }
 refute_contains 'Port assignment|Stack already running' "$OUTPUT"
 assert_contains '^docker compose up -d$' "$COMMANDS"
+refute_contains '--build|--watch' "$COMMANDS"
+refute_contains 'not watching' "$OUTPUT"
+run_up
+assert_contains '^docker compose up$' "$COMMANDS"
+refute_contains '--build|--watch' "$COMMANDS"
 
 echo 'up.sh regression checks passed.'

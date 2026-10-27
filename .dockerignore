@@ -12,3 +12,6 @@ htmlcov
 instance
 .env
 plans
+# Local-run uploads stay out of the images, so out of a newly created uploads_data
+# volume, and out of the dev stack's file watch.
+src_back/uploads
