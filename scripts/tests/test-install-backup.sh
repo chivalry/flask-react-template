@@ -4,6 +4,9 @@
 # with stub rclone, systemctl, and apt-get commands. It runs under macOS's bash 3.2 and
 # on Linux in CI, so it avoids bash 4 features.
 set -euo pipefail
+# The umask a root shell has, so the directories the installer makes start out open and
+# the mode check shows what it closes; the installer sets its own, stricter umask later.
+umask 022
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
@@ -124,6 +127,12 @@ assert_file_count() {
     { echo "Expected $1 files matching $3 in ${2##*/}, found $found" >&2; exit 1; }
 }
 
+# assert_mode MODE PATH -> PATH has exactly this permission mode.
+assert_mode() {
+  [ -n "$(find "$2" -maxdepth 0 -perm "$1")" ] ||
+    { echo "Expected mode $1 on ${2##*/}" >&2; exit 1; }
+}
+
 # No host path may survive the rewrite, or a run would reach the real system. The
 # rewritten paths begin with $TEST_DIR, which starts with /var/folders/ on macOS, so the
 # check reads the copy without it.
@@ -158,6 +167,9 @@ wrong_mode=$(find "$SYSTEMD" -type f ! -perm 644)
 for directory in "$TEST_DIR/log/$APP" "$TEST_DIR/backups/$APP"; do
   [ -d "$directory" ] || { echo "Missing the directory $directory." >&2; exit 1; }
 done
+# The backup root is closed to everyone but root. The installer makes it before it sets
+# its own umask, so without the chmod it would stay at the open default.
+assert_mode 700 "$TEST_DIR/backups/$APP"
 assert_contains "systemctl start $APP-restore-drill\.service" "$OUTPUT"
 
 # Without a bucket the installer stops before it writes the remote or runs anything.

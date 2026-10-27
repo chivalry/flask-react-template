@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Weekly restore drill: prove the newest daily backup restores. It takes the newest
-# daily/db dump and daily/uploads archive, from the bucket once the rclone remote
-# 'spaces:' that install-backup.sh writes is configured and otherwise from
-# /var/backups/<APP_NAME>/daily, restores the dump into a scratch Postgres container
-# that has no network, and fails unless:
+# daily/db dump and the daily/uploads archive of the same run, which carries the same
+# timestamp, from the bucket once the rclone remote 'spaces:' that install-backup.sh
+# writes is configured and otherwise from /var/backups/<APP_NAME>/daily, restores the
+# dump into a scratch Postgres container that has no network, and fails unless:
 #   - the dump is at most MAX_AGE_HOURS old, so backups that stopped are reported;
+#   - the dump's archive exists, so a run whose archive upload failed is reported;
 #   - users has rows and alembic_version exactly one (every table's count is logged);
 #   - the archive reads to its end, and for each UPLOAD_COLUMNS column the restored
 #     schema has, one stored path is in it.
@@ -42,6 +43,10 @@ LOG_DIR="/var/log/$APP_NAME"
 WORK_ROOT="/var/backups/$APP_NAME"
 DAILY="$WORK_ROOT/daily"
 mkdir -p "$LOG_DIR" "$WORK_ROOT"
+# backup.sh keeps the dumps and archives here private. If the drill is the first to make
+# the directory, or an older version left it at the default 755, it closes the directory
+# the same way.
+chmod 700 "$WORK_ROOT"
 exec >>"$LOG_DIR/restore-drill.log" 2>&1
 
 log() { printf '%s [restore-drill] %s\n' "$(date -u +%FT%TZ)" "$*"; }
@@ -101,10 +106,14 @@ fi
 # timestamped names make time order; empty when nothing matches.
 newest_matching_name() { grep -E -- "$2" "$1" | LC_ALL=C sort | tail -n 1 || true; }
 DB_NAME="$(newest_matching_name "$TMP/db.list" '^db-[0-9]{8}T[0-9]{6}Z.*\.dump$')"
-UP_NAME="$(newest_matching_name "$TMP/uploads.list" \
-  '^uploads-[0-9]{8}T[0-9]{6}Z.*\.tar\.gz$')"
 [ -n "$DB_NAME" ] || fail "no daily database dump in $SOURCE"
-[ -n "$UP_NAME" ] || fail "no daily uploads archive in $SOURCE"
+# backup.sh gives a run's dump and archive the same timestamp, and pushes the dump first.
+# The newest archive is the wrong one to pair with the newest dump when the archive's
+# upload failed: it belongs to an older run. Take the archive that carries the dump's
+# timestamp, or call the backup incomplete.
+UP_NAME="uploads-${DB_NAME:3:16}.tar.gz"
+grep -Fxq -- "$UP_NAME" "$TMP/uploads.list" ||
+  fail "$DB_NAME has no matching $UP_NAME in $SOURCE: the newest backup is incomplete"
 
 # --- freshness ---
 # stamp_to_epoch_seconds <YYYYmmddTHHMMSSZ>: seconds since the epoch, in shell

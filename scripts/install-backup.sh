@@ -33,6 +33,9 @@ fi
 
 # The units run as root, so the remote lives in root's rclone config.
 mkdir -p /root/.config/rclone "/var/log/$APP_NAME" "/var/backups/$APP_NAME"
+# What backup.sh keeps here holds the database and the uploads; backup.sh and
+# restore-drill.sh close the directory the same way before they write to it.
+chmod 700 "/var/backups/$APP_NAME"
 
 echo "==> Writing rclone Spaces remote..."
 umask 077

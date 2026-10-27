@@ -67,6 +67,11 @@ compose() {
 LOG_DIR="/var/log/$APP_NAME"
 WORK_ROOT="/var/backups/$APP_NAME"
 mkdir -p "$LOG_DIR" "$WORK_ROOT"
+# The dumps and archives under WORK_ROOT hold the database and the uploads, so only root
+# may enter it. The directory is what protects them: tar in the alpine container writes
+# the archive mode 644 whatever this script's umask is, and mkdir -p leaves a directory
+# that an earlier version made with the default 755 as it was.
+chmod 700 "$WORK_ROOT"
 exec >>"$LOG_DIR/backup.log" 2>&1
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"

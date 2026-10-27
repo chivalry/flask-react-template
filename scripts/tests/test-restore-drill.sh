@@ -4,6 +4,9 @@
 # plays the scratch Postgres from fixture files. It runs under macOS's bash 3.2 and on
 # Linux in CI, so it avoids bash 4 features.
 set -euo pipefail
+# The umask systemd gives a service, so the directories the cases and the script make
+# start out open, and the mode checks show what the script closes.
+umask 022
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # The scratch container must run the image of the db service in docker-compose.yml,
@@ -49,6 +52,7 @@ RUN+=' -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_USER=app -e POSTGRES_DB=ap
 RUN+=' postgres:16'
 RESTORE="docker exec -i $CONTAINER pg_restore -U app -d app"
 RESTORE+=' --no-owner --no-privileges --exit-on-error'
+UNPAIRED_DUMP="db-$NEWEST\.dump has no matching uploads-$NEWEST\.tar\.gz in "
 
 # Each stub logs its call to $TEST_DIR/commands and reads its conditions from markers
 # in $TEST_DIR/flags. docker plays the scratch Postgres. It cannot start the container
@@ -190,6 +194,12 @@ assert_file_count() {
     { echo "Expected $1 files matching $3 in ${2##*/}, found $found" >&2; exit 1; }
 }
 
+# assert_mode MODE PATH -> PATH has exactly this permission mode.
+assert_mode() {
+  [ -n "$(find "$2" -maxdepth 0 -perm "$1")" ] ||
+    { echo "Expected mode $1 on ${2##*/}" >&2; exit 1; }
+}
+
 # assert_call_count COUNT PATTERN -> exactly COUNT logged commands match PATTERN.
 assert_call_count() {
   local found
@@ -312,6 +322,9 @@ leftover=$(find "$WORK_ROOT" -maxdepth 1 -name 'drill.*')
 [ -z "$leftover" ] || { echo "The run left $leftover behind." >&2; exit 1; }
 assert_file_count 2 "$DAILY" 'db-*.dump'
 assert_file_count 2 "$DAILY" 'uploads-*.tar.gz'
+# The backup root is closed to everyone but root, though the case made it with the open
+# default: the dump and the archive stay private because the directory is.
+assert_mode 700 "$WORK_ROOT"
 
 # Once the spaces: remote is configured, the drill takes the bucket's newest pair, even
 # when this host holds a newer one, and downloads it into the run's directory.
@@ -366,19 +379,42 @@ rm "$DATABASE/tables/alembic_version"
 expect_drill_failure 'a missing alembic_version table to fail the drill'
 assert_drill_failed 'the restored database has no alembic_version table'
 
-# With nothing to restore, the drill fails without starting a container: first when the
-# host has no daily directory, then when it has dumps and no archives.
+# With nothing to restore, the drill fails without starting a container: when the host
+# has no daily directory, which the script still makes private, and when it has dumps
+# and no archives at all.
 start_test_case
 expect_drill_failure 'a host without daily backups to fail the drill'
 assert_drill_failed 'no daily backups yet'
 refute_contains '^docker ' "$COMMANDS"
+assert_mode 700 "$WORK_ROOT"
 start_test_case
 seed_backup_pair "$DAILY" "$DAILY" "$OLDER"
 seed_backup_pair "$DAILY" "$DAILY" "$NEWEST"
 rm "$DAILY"/uploads-*.tar.gz
 expect_drill_failure 'dumps without archives to fail the drill'
-assert_drill_failed 'no daily uploads archive in'
+assert_drill_failed "$UNPAIRED_DUMP"
 refute_contains '^docker ' "$COMMANDS"
+
+# The newest dump needs the archive of its own run, not the newest archive. A run whose
+# archive upload failed leaves a fresh dump beside an older run's archive, and the drill
+# must not certify that. This holds on the host and in the bucket, and the drill stops
+# before it downloads anything or starts a container.
+start_test_case
+seed_backup_pair "$DAILY" "$DAILY" "$OLDER"
+seed_backup_pair "$DAILY" "$DAILY" "$NEWEST"
+rm "$DAILY/uploads-$NEWEST.tar.gz"
+expect_drill_failure 'a dump beside only an older archive to fail the drill'
+assert_drill_failed "$UNPAIRED_DUMP$DAILY"
+assert_contains 'the newest backup is incomplete' "$LOG"
+refute_contains '^docker ' "$COMMANDS"
+start_test_case SPACES_BUCKET=test-bucket
+touch "$FLAGS/remote-configured"
+seed_backup_pair "$BUCKET_DIR/daily/db" "$BUCKET_DIR/daily/uploads" "$OLDER"
+seed_backup_pair "$BUCKET_DIR/daily/db" "$BUCKET_DIR/daily/uploads" "$NEWEST"
+rm "$BUCKET_DIR/daily/uploads/uploads-$NEWEST.tar.gz"
+expect_drill_failure 'a bucket dump beside only an older archive to fail the drill'
+assert_drill_failed "$UNPAIRED_DUMP$REMOTE/daily"
+refute_contains '^(docker|rclone copyto) ' "$COMMANDS"
 
 # A newest dump up to 48 hours old passes; an older one fails, saying how old it is,
 # before any container starts. A pair stamped on a leap day, with the clock an hour

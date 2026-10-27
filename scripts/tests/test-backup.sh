@@ -14,6 +14,9 @@ if [ "$(uname -s)" != Linux ]; then
   echo 'test-backup.sh runs only on Linux; its header gives the container command.' >&2
   exit 77
 fi
+# The umask systemd gives a service, so the directories the cases and the script make
+# start out open, and the mode checks show what the script closes.
+umask 022
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
@@ -34,6 +37,7 @@ FLAGS="$TEST_DIR/flags"
 ENV_FILE="$TEST_DIR/repo/.env"
 COMMANDS="$TEST_DIR/commands"
 LOG="$TEST_DIR/log/flask-react-template/backup.log"
+WORK_ROOT="$TEST_DIR/backups/flask-react-template"
 PRE_MIGRATION="$TEST_DIR/backups/flask-react-template/pre-migration"
 DAILY="$TEST_DIR/backups/flask-react-template/daily"
 BUCKET_DIR="$TEST_DIR/bucket/test-bucket/prod"
@@ -224,6 +228,12 @@ assert_file_count() {
     { echo "Expected $1 files matching $3 in ${2##*/}, found $found" >&2; exit 1; }
 }
 
+# assert_mode MODE PATH -> PATH has exactly this permission mode.
+assert_mode() {
+  [ -n "$(find "$2" -maxdepth 0 -perm "$1")" ] ||
+    { echo "Expected mode $1 on ${2##*/}" >&2; exit 1; }
+}
+
 # seed_older_backups DIRECTORY PREFIX SUFFIX COUNT -> COUNT files named for consecutive
 # days from 2020-01-01, all older than any run's timestamp.
 seed_older_backups() {
@@ -261,6 +271,10 @@ assert_file_count 7 "$DAILY" 'uploads-*.tar.gz'
 assert_file_count 6 "$DAILY" 'db-2020*'
 assert_file_count 6 "$DAILY" 'uploads-2020*'
 assert_file_count 0 "$DAILY" '*-2020010[12]T*'
+# The backup root is closed to everyone but root, though the case made it with the open
+# default: tar in the container writes the archive mode 644 whatever the umask, so the
+# dump and the archive stay private because the directory is.
+assert_mode 700 "$WORK_ROOT"
 
 # RETAIN_LOCAL_DAILY sets how many copies of each kind stay.
 start_test_case RETAIN_LOCAL_DAILY=2
@@ -412,6 +426,8 @@ run_backup --pre-migration --label abc1234
 assert_file_count 1 "$PRE_MIGRATION" 'db-*-abc1234.dump'
 assert_contains 'WARN: Spaces remote not configured yet; kept LOCAL pre-migration' "$LOG"
 [ ! -e "$DAILY" ] || { echo "A pre-migration run wrote $DAILY" >&2; exit 1; }
+# A run that makes the backup root itself closes it, too.
+assert_mode 700 "$WORK_ROOT"
 
 # With the remote configured, the labelled dump goes to premigration/ in the bucket too.
 start_test_case SPACES_BUCKET=test-bucket

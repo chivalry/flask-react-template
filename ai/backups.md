@@ -30,6 +30,13 @@ newest three. Until the rclone remote exists, a daily run keeps only these copie
 logs `WARN: Spaces remote not configured; kept LOCAL daily backup only` and succeeds.
 Local copies die with the server, so they stand in for a bucket only until one exists.
 
+`/var/backups/$APP_NAME` is mode 700, so only root can read the copies, whatever the
+files' own modes: the archive is written by a container, which ignores the script's
+umask. `backup.sh`, `restore-drill.sh`, and `install-backup.sh` set the mode when they
+run, which also closes a directory that an earlier version left at 755. Anything that
+copies the backups off the server as a non-root user needs sudo or a read group of its
+own.
+
 Local copies cost disk: at the default of 7, the archives of a 3 GB uploads volume take
 about 21 GB, so lower `RETAIN_LOCAL_DAILY` on a small disk. A run refuses to start with
 under about 2 GB free on the disk that holds `/var/backups/$APP_NAME`.
@@ -137,8 +144,11 @@ drill run with plain `bash` logs the same but alerts nobody.
 `$APP_NAME-restore-drill.timer` runs `scripts/restore-drill.sh` on Sundays at 04:00 UTC,
 and at the next boot if the server was off then. Each run does this:
 
-1. It takes the newest database dump and uploads archive from the bucket once the
-   remote exists, otherwise from `daily/` on the server.
+1. It takes the newest database dump and the uploads archive made in the same run, which
+   carries the same timestamp, from the bucket once the remote exists, otherwise from
+   `daily/` on the server. A dump with no such archive means the run's archive upload
+   failed, so the drill fails and reports the backup as incomplete, whatever older
+   archives exist.
 2. It fails on a dump more than 48 hours old: backups run daily, so an older dump means
    they stopped reaching where the drill looks.
 3. It starts the scratch `postgres:16` container `$APP_NAME-restore-drill`, with no
@@ -161,7 +171,7 @@ Things to know:
 - The drill is deliberately not ordered after the backup, so a hung backup cannot keep
   it from starting. The cost: after two or more days of downtime spanning a Sunday
   04:00, the catch-up drill can start before the catch-up backup finishes and alert
-  once about an old dump.
+  once, about an old dump or a dump whose archive has not arrived yet.
 - `UPLOAD_COLUMNS` at the top of the script is empty because the template stores no
   upload paths. Add `table.column` in the same change as the migration that creates
   such a column; a dump from before the migration lacks the column, so the drill skips

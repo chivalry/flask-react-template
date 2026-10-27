@@ -299,8 +299,9 @@ backup, and restore-drill units.
   can share a host.
 - **rclone**: once a bucket is configured, pushes the backups to an S3-compatible
   bucket, DigitalOcean Spaces by default, with tiered daily, weekly, and monthly
-  retention, and the restore drill fetches the newest dump and uploads archive from
-  it. `scripts/install-backup.sh` installs it and writes its remote from `.env`.
+  retention, and the restore drill fetches the newest dump and the uploads archive of
+  the same run from it. `scripts/install-backup.sh` installs it and writes its remote
+  from `.env`.
 - **pg_dump and pg_restore**: run inside the database container. Every backup is a
   custom-format `pg_dump`, as is the dump each deploy takes before migrating, which is
   named for the commit that was running. The manual recovery in `ai/backups.md`
