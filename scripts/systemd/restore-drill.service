@@ -1,0 +1,17 @@
+# Rendered by scripts/deploy.sh and scripts/install-backup.sh: __APP_NAME__ and
+# __REPO_DIR__ come from the server's .env and clone location; installed as
+# <APP_NAME>-restore-drill.service. A failed or timed-out drill starts
+# <APP_NAME>-alert-restore-drill.service, which reports it through scripts/alert.sh.
+[Unit]
+Description=__APP_NAME__ weekly restore drill (newest daily backup -> scratch Postgres)
+After=docker.service
+Requires=docker.service
+OnFailure=__APP_NAME__-alert-restore-drill.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_DIR__
+ExecStart=/bin/bash __REPO_DIR__/scripts/restore-drill.sh
+# A oneshot unit has no start timeout by default, so a hung restore would never fail,
+# never alert, and keep every later drill from starting.
+TimeoutStartSec=1h

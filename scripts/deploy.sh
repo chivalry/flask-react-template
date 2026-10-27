@@ -6,10 +6,12 @@
 # issued the certificate the nginx site references.
 #
 # Steps: pre-flight checks (Compose project + data volumes, certificate present),
-# git pull, pre-migration database backup (starting the database first if the stack is
-# stopped), rebuild and restart the stack, wait for the backend to report healthy (its
-# entrypoint runs the migrations and the seed before gunicorn starts), install the
-# nginx site, the certbot deploy hook, and the certificate monitoring units.
+# git pull, pre-migration database backup named for the commit that was running
+# (starting the database first if the stack is stopped), rebuild and restart the
+# stack, wait for the backend to report healthy (its entrypoint runs the migrations
+# and the seed before gunicorn starts), install the nginx site, the certbot deploy
+# hook, and the systemd units: certificate monitoring, the daily backup, and the
+# weekly restore drill.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -109,6 +111,11 @@ fi
 
 echo "==> Deploying '$APP_NAME' ($REPO_DIR) for https://$DOMAIN"
 
+# The commit checked out before the pull is the release whose schema the database
+# holds, unless an earlier deploy failed after pulling; the pre-migration dump is
+# named for it.
+RUNNING_COMMIT="$(git rev-parse HEAD)"
+
 echo "==> Pulling latest code..."
 git pull
 
@@ -121,7 +128,7 @@ if [ "$FIRST_DEPLOY" = 0 ]; then
   compose up -d db
   wait_for_db
   echo "==> Pre-migration DB backup..."
-  if ! bash scripts/backup.sh --pre-migration; then
+  if ! bash scripts/backup.sh --pre-migration --label "$RUNNING_COMMIT"; then
     echo "ERROR: pre-migration backup failed — see $LOG_DIR/backup.log"
     exit 1
   fi
@@ -163,25 +170,28 @@ mkdir -p /etc/letsencrypt/renewal-hooks/deploy
 install -m 0755 scripts/letsencrypt-deploy-hook.sh \
   /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 
-# Host-wide certificate monitoring. The unit files carry __APP_NAME__ and __REPO_DIR__
-# placeholders so several apps on one host each get their own units; the certbot
-# drop-in is named per app because systemd merges OnFailure= across drop-ins.
-echo "==> Installing certificate monitoring..."
+# Host-wide certificate monitoring, the daily backup, and the weekly restore drill.
+# The unit files carry __APP_NAME__ and __REPO_DIR__ placeholders so several apps on
+# one host each get their own units; the certbot drop-in is named per app because
+# systemd merges OnFailure= across drop-ins. The backup and drill units go in on
+# every deploy, bucket or not: backup.sh keeps local copies until install-backup.sh
+# adds the remote.
+echo "==> Installing certificate monitoring, backups, and the restore drill..."
 render_systemd_unit() {  # <template> <destination>
   sed -e "s|__APP_NAME__|$APP_NAME|g" -e "s|__REPO_DIR__|$REPO_DIR|g" "$1" > "$2"
   chmod 644 "$2"
 }
-render_systemd_unit scripts/systemd/cert-check.service \
-  "/etc/systemd/system/$APP_NAME-cert-check.service"
-render_systemd_unit scripts/systemd/cert-check.timer \
-  "/etc/systemd/system/$APP_NAME-cert-check.timer"
-render_systemd_unit scripts/systemd/alert-certbot.service \
-  "/etc/systemd/system/$APP_NAME-alert-certbot.service"
+for unit in cert-check.service cert-check.timer alert-certbot.service \
+  backup.service backup.timer restore-drill.service restore-drill.timer \
+  alert-restore-drill.service; do
+  render_systemd_unit "scripts/systemd/$unit" "/etc/systemd/system/$APP_NAME-$unit"
+done
 mkdir -p /etc/systemd/system/certbot.service.d
 render_systemd_unit scripts/systemd/certbot-onfailure.conf \
   "/etc/systemd/system/certbot.service.d/$APP_NAME-onfailure.conf"
 systemctl daemon-reload
-systemctl enable --now "$APP_NAME-cert-check.timer"
+systemctl enable --now "$APP_NAME-cert-check.timer" "$APP_NAME-backup.timer" \
+  "$APP_NAME-restore-drill.timer"
 
 echo ""
 echo "==> Deployment complete: https://$DOMAIN"

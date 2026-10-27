@@ -14,7 +14,7 @@
 # Next steps, in order:
 #   bash scripts/certbot-setup.sh --email <addr>   # first certificate (after DNS)
 #   bash scripts/deploy.sh                          # first deploy (or: npm run deploy)
-#   bash scripts/install-backup.sh                  # after filling SPACES_* in .env
+#   bash scripts/install-backup.sh                  # off-site copies, after SPACES_*
 set -euo pipefail
 
 DOMAIN="${1:?usage: bash scripts/provision.sh <domain>}"
@@ -120,8 +120,10 @@ CERTBOT_EMAIL=
 ALERT_WEBHOOK_URL=
 ALERT_WEBHOOK_FORMAT=text
 
-# --- Off-site backups (scripts/backup.sh) to an S3-compatible bucket via rclone --
-# Fill in after creating the bucket and an access key; run scripts/install-backup.sh.
+# --- Backups (scripts/backup.sh) ------------------------------------------------
+# Every daily run keeps its newest RETAIN_LOCAL_DAILY dumps and uploads archives in
+# /var/backups/$APP_NAME/daily. For off-site copies too, create a bucket and an
+# access key, fill in SPACES_*, and run scripts/install-backup.sh.
 SPACES_ENDPOINT=https://nyc3.digitaloceanspaces.com
 SPACES_REGION=nyc3
 SPACES_BUCKET=
@@ -131,6 +133,7 @@ BACKUP_PREFIX=prod
 RETAIN_DAILY=14
 RETAIN_WEEKLY=8
 RETAIN_MONTHLY=6
+RETAIN_LOCAL_DAILY=7
 ENV
 # end of .env heredoc
   echo "    .env created at $REPO_DIR/.env (mode 600)."

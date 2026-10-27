@@ -1,7 +1,8 @@
-# Rendered by scripts/install-backup.sh: __APP_NAME__ and __REPO_DIR__ come from the
-# server's .env and clone location; installed as <APP_NAME>-backup.service.
+# Rendered by scripts/deploy.sh and scripts/install-backup.sh: __APP_NAME__ and
+# __REPO_DIR__ come from the server's .env and clone location; installed as
+# <APP_NAME>-backup.service.
 [Unit]
-Description=__APP_NAME__ off-site backup (DB + uploads -> Spaces)
+Description=__APP_NAME__ backup (DB + uploads, local copies and an optional bucket)
 After=docker.service
 Requires=docker.service
 
