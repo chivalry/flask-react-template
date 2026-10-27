@@ -1,0 +1,11 @@
+# Rendered by scripts/deploy.sh and scripts/install-backup.sh; installed as
+# <APP_NAME>-restore-drill.timer.
+[Unit]
+Description=Weekly __APP_NAME__ restore drill
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

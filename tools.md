@@ -213,8 +213,8 @@ The `devDependencies` in `package.json`.
 `npm run test:scripts` runs `scripts/tests/run-all.sh`, and so does CI.
 
 - **`scripts/tests/`**: Bash tests. Each `test-<script>.sh` runs its script against
-  stub commands such as `docker`, `lsof`, and `rclone`, which log their calls instead
-  of acting, and checks the log and the files the script wrote;
+  stub commands such as `docker`, `lsof`, `rclone`, `systemctl`, and `sudo`, which log
+  their calls instead of acting, and checks the log and the files the script wrote;
   `test-compose-config.sh` checks the rendered Compose stacks instead. `run-all.sh`
   first checks every script's syntax with `bash -n` or `sh -n`, as its shebang names.
 - **jq**: `test-compose-config.sh` queries the JSON that `docker compose config`
@@ -248,7 +248,10 @@ The `devDependencies` in `package.json`.
   the built bundle, falls back to `index.html` for client routes, proxies `/api` and
   `/uploads` to the backend, and answers oversized uploads with the app's JSON 413.
 - **`postgres:16`**: the database image, with a `pg_isready` health check the backend
-  waits on before it starts. CI runs the same image as a service container.
+  waits on before it starts. CI runs the same image as a service container. The weekly
+  restore drill restores the newest backup into a scratch container of the same image,
+  and `test-restore-drill.sh` checks that the drill and the `db` service name the same
+  tag.
 - **`alpine`**: the throwaway container `scripts/backup.sh` mounts the uploads volume
   into to archive it; the restore steps in `ai/backups.md` use it the same way.
 
@@ -273,7 +276,8 @@ The `devDependencies` in `package.json`.
 ## Servers and operations
 
 The server's packages come from `scripts/provision.sh` and `scripts/install-backup.sh`;
-`scripts/deploy.sh` installs the nginx site, the renewal hook, and the monitoring units.
+`scripts/deploy.sh` installs the nginx site, the renewal hook, and the monitoring,
+backup, and restore-drill units.
 
 - **Ubuntu**: the production server's operating system. `scripts/provision.sh`
   installs every package with apt.
@@ -287,15 +291,21 @@ The server's packages come from `scripts/provision.sh` and `scripts/install-back
   while nginx holds it. The packaged `certbot.timer` attempts renewal twice a day, and
   a deploy hook reloads nginx after each renewal. See `ai/tls.md`.
 - **systemd**: the units and timers under `scripts/systemd/`: the nightly backup at
-  02:30 UTC, the daily certificate expiry check at 05:00 UTC, and the `OnFailure`
-  drop-in that reports a failed certbot renewal. The scripts render their
-  `__APP_NAME__` and `__REPO_DIR__` placeholders so several apps can share a host.
-- **rclone**: pushes the backups to an S3-compatible bucket, DigitalOcean Spaces by
-  default, with tiered daily, weekly, and monthly retention.
-  `scripts/install-backup.sh` installs it and writes its remote from `.env`.
-- **pg_dump and pg_restore**: run inside the database container. Every backup, and
-  the dump each deploy takes before migrating, is a custom-format `pg_dump`; the
-  manual recovery in `ai/backups.md` restores one with `pg_restore`.
+  02:30 UTC, the weekly restore drill on Sundays at 04:00 UTC, the daily certificate
+  expiry check at 05:00 UTC, and the units that `OnFailure=` starts to report a failed
+  certbot renewal and a failed or timed-out drill. `scripts/deploy.sh` installs them
+  all, and `scripts/install-backup.sh` installs the backup and drill units too. The
+  scripts render their `__APP_NAME__` and `__REPO_DIR__` placeholders so several apps
+  can share a host.
+- **rclone**: once a bucket is configured, pushes the backups to an S3-compatible
+  bucket, DigitalOcean Spaces by default, with tiered daily, weekly, and monthly
+  retention, and the restore drill fetches the newest dump and uploads archive from
+  it. `scripts/install-backup.sh` installs it and writes its remote from `.env`.
+- **pg_dump and pg_restore**: run inside the database container. Every backup is a
+  custom-format `pg_dump`, as is the dump each deploy takes before migrating, which is
+  named for the commit that was running. The manual recovery in `ai/backups.md`
+  restores one with `pg_restore`, and the restore drill restores the newest daily dump
+  into a scratch container every week.
 - **OpenSSL**: generates the database password and Flask's secret key when a server is
   provisioned, and reads certificate expiry dates in `scripts/cert-check.sh`.
 - **curl**: fetches Docker's apt signing key, asks `api.ipify.org` for the server's
@@ -304,9 +314,9 @@ The server's packages come from `scripts/provision.sh` and `scripts/install-back
 - **dig**: from `dnsutils`. It confirms the domain resolves to the server's address
   before certbot asks for a certificate.
 - **Webhooks (ntfy.sh, Slack, or Discord)**: where `scripts/alert.sh` sends failed
-  backups, failed renewals, and expiring certificates. `ALERT_WEBHOOK_FORMAT` picks
-  the payload shape, and the server's `python3` escapes the Slack and Discord JSON.
-  With no URL set, alerts are only logged.
+  backups, failed restore drills, failed renewals, and expiring certificates.
+  `ALERT_WEBHOOK_FORMAT` picks the payload shape, and the server's `python3` escapes
+  the Slack and Discord JSON. With no URL set, alerts are only logged.
 - **git**: the server runs from a clone of the repository, and every deploy pulls into
   it.
 - **Vim**: the editor for reviewing the generated `.env` on the server and filling in

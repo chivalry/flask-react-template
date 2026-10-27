@@ -1,6 +1,7 @@
-# Rendered by scripts/install-backup.sh; installed as <APP_NAME>-backup.timer.
+# Rendered by scripts/deploy.sh and scripts/install-backup.sh; installed as
+# <APP_NAME>-backup.timer.
 [Unit]
-Description=Daily __APP_NAME__ off-site backup
+Description=Daily __APP_NAME__ backup
 
 [Timer]
 OnCalendar=*-*-* 02:30:00 UTC

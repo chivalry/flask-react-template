@@ -279,7 +279,8 @@ bash scripts/certbot-setup.sh --email you@example.com  # first certificate, afte
 
 Then, from your machine, `DEPLOY_HOST=root@example.com npm run deploy`.
 `scripts/deploy.sh` backs up the database before migrating, rebuilds the containers,
-installs the nginx site, and enables certificate monitoring. Once the `SPACES_*`
-variables are filled in, `bash scripts/install-backup.sh` enables nightly off-site
-backups with alerts on failure. `ai/backups.md` and `ai/tls.md` cover restores,
-alerts, and renewals.
+installs the nginx site, and enables certificate monitoring, nightly backups kept on the
+server, and a weekly drill that restores the newest one. Once the `SPACES_*` variables
+are filled in, `bash scripts/install-backup.sh` adds off-site copies in a bucket.
+Failures alert through `ALERT_WEBHOOK_URL`; `ai/backups.md` and `ai/tls.md` cover
+restores, alerts, and renewals.

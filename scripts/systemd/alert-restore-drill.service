@@ -1,0 +1,12 @@
+# Rendered by scripts/deploy.sh and scripts/install-backup.sh; installed as
+# <APP_NAME>-alert-restore-drill.service and started by OnFailure= in
+# restore-drill.service when a drill fails or times out.
+[Unit]
+Description=Report a failed restore drill for __APP_NAME__
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_DIR__
+ExecStart=/bin/bash __REPO_DIR__/scripts/alert.sh \
+  "__APP_NAME__: restore drill FAILED" \
+  "The restore drill failed on %H. Log: /var/log/__APP_NAME__/restore-drill.log"
