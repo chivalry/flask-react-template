@@ -1,7 +1,7 @@
 import io
 import uuid
 from collections.abc import Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -38,6 +38,7 @@ from src_back.utils import (
     pagination_args,
     parse_id_list,
     parse_query_date,
+    parse_query_datetime,
     parse_request_json,
     require_parent,
     unauthorized,
@@ -225,6 +226,54 @@ def test_parse_query_date_rejects_any_other_form(app: Flask, value: str) -> None
         pytest.raises(ValueError, match='due must be a date in YYYY-MM-DD form'),
     ):
         parse_query_date('due')
+
+
+# -- parse_query_datetime -----------------------------------------------------
+
+
+@pytest.mark.parametrize('path', ['/', '/?at=', '/?at=+'])
+def test_parse_query_datetime_is_none_when_absent_or_blank(app: Flask, path: str) -> None:
+    with app.test_request_context(path):
+        assert parse_query_datetime('at') is None
+
+
+@pytest.mark.parametrize('value', ['2026-10-14T07:00:00Z', '2026-10-14T00:00:00-07:00'])
+def test_parse_query_datetime_reads_an_offset_as_utc(app: Flask, value: str) -> None:
+    with app.test_request_context('/', query_string={'at': value}):
+        moment = parse_query_datetime('at')
+    assert moment == datetime(2026, 10, 14, 7, tzinfo=UTC)
+    assert moment is not None
+    assert moment.tzinfo is UTC
+
+
+@pytest.mark.parametrize('value', ['2026-10-14T07:00:00', '2026-10-14', 'yesterday'])
+def test_parse_query_datetime_rejects_any_value_without_an_offset(
+    app: Flask, value: str
+) -> None:
+    with (
+        app.test_request_context('/', query_string={'at': value}),
+        pytest.raises(
+            ValueError,
+            match='at must be an ISO 8601 date and time with a UTC offset',
+        ),
+    ):
+        parse_query_datetime('at')
+
+
+@pytest.mark.parametrize(
+    'value', ['0001-01-01T00:00:00+01:00', '9999-12-31T23:30:00-01:00']
+)
+def test_parse_query_datetime_rejects_a_moment_utc_cannot_express(
+    app: Flask, value: str
+) -> None:
+    with (
+        app.test_request_context('/', query_string={'at': value}),
+        pytest.raises(
+            ValueError,
+            match='at must be an ISO 8601 date and time with a UTC offset',
+        ),
+    ):
+        parse_query_datetime('at')
 
 
 # -- dump_or_404 and paginate_and_dump ----------------------------------------

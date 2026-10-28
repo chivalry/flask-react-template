@@ -4,6 +4,7 @@ import { Box, Container, Tab, Tabs } from '@mui/material'
 import type { ReactNode } from 'react'
 import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom'
 
+import AdminAuditLogTab from '../components/admin/AdminAuditLogTab'
 import UsersAdmin from '../components/admin/UsersAdmin'
 
 /** One admin section: its route segment, its tab label, and its content. */
@@ -19,6 +20,7 @@ const ADMIN_BASE = '/admin'
 /** Every admin section, in tab order; `/admin` and unknown paths land on the first. */
 const SECTIONS: AdminSection[] = [
     { path: 'users', label: 'Users', element: <UsersAdmin /> },
+    { path: 'audit', label: 'Audit', element: <AdminAuditLogTab /> },
 ]
 
 /** The first section's absolute path, the target of both redirects. */

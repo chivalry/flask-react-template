@@ -290,6 +290,40 @@ def parse_query_date(name: str) -> date | None:
     return parsed
 
 
+def parse_query_datetime(name: str) -> datetime | None:
+    """Read an optional ISO 8601 moment, with its UTC offset, from the query string.
+
+    The moment comes back in UTC: SQLite stores datetimes without an offset, so a
+    bound in another zone would compare as if it were UTC.
+
+    Args:
+        name: The query parameter to read.
+
+    Returns:
+        The moment in UTC, or ``None`` when the parameter is absent or blank.
+
+    Raises:
+        ValueError: If the value is not a date and time with an offset, such as
+            ``2026-10-14T07:00:00Z``, or is one that UTC cannot express, such as
+            ``0001-01-01T00:00:00+01:00``.
+    """
+    raw = request.args.get(name, '').strip()
+    if not raw:
+        return None
+    message = f'{name} must be an ISO 8601 date and time with a UTC offset.'
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError(message) from exc
+    if parsed.tzinfo is None:
+        raise ValueError(message)
+    try:
+        return parsed.astimezone(UTC)
+    except OverflowError as exc:
+        # Hours from the ends of the calendar, the same moment in UTC falls off it.
+        raise ValueError(message) from exc
+
+
 def dump_or_404(record: object, schema: Schema) -> tuple[Response, int]:
     """Serialize a record with status 200, or answer 404 when it is missing.
 

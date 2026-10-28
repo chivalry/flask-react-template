@@ -224,11 +224,12 @@ def _register_blueprints(app: Flask) -> None:
     Args:
         app: The application being configured.
     """
-    from src_back.api import auth_bp, health_bp, users_bp
+    from src_back.api import audit_logs_bp, auth_bp, health_bp, users_bp
 
     app.register_blueprint(health_bp, url_prefix='/api')
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
     app.register_blueprint(users_bp, url_prefix='/api/v1/users')
+    app.register_blueprint(audit_logs_bp, url_prefix='/api/v1/audit-logs')
 
 
 def _build_json_error_handler(

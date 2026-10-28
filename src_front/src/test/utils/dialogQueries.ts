@@ -5,5 +5,9 @@ import { screen, within } from '@testing-library/react'
 export const rowContaining = (text: string) =>
     within(screen.getByText(text).closest('li')!)
 
+/** Scope queries to the table row containing the supplied text. */
+export const tableRowContaining = (text: string) =>
+    within(screen.getByText(text).closest('tr')!)
+
 /** Scope queries to the currently open dialog. */
 export const findDialog = async () => within(await screen.findByRole('dialog'))

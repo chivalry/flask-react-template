@@ -1,9 +1,13 @@
 import pytest
+from flask import Flask, g
+from flask_login import login_user
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import inspect
+from sqlalchemy import func, inspect, select
 
+from src_back.models import AuditAction, AuditLog, User
+from src_back.services import audit_log
 from src_back.services.base import ChildRecordService, CRUDService, require_unique_name
-from src_back.services.errors import DuplicateRecordError
+from src_back.services.errors import DuplicateRecordError, RecordInUseError
 from src_back.tests.conftest import Widget, WidgetNote
 
 
@@ -204,6 +208,150 @@ def test_child_default_after_delete_is_a_no_op(db: SQLAlchemy) -> None:
     note = _make_note(db, _make_widget(db))
     service = ChildRecordService(WidgetNote, 'widget_id', WidgetNote.id)
     assert service.after_delete(note) is None
+
+
+# -- auditing -----------------------------------------------------------------
+
+
+class RefusingAuditedService(CRUDService[Widget]):
+    def __init__(self) -> None:
+        super().__init__(Widget, Widget.name, audit_fields=('name',))
+
+    def before_delete(self, record: Widget) -> None:
+        raise RecordInUseError('in use', 1)
+
+
+def _audited_widgets() -> CRUDService[Widget]:
+    return CRUDService(Widget, Widget.name, audit_fields=('name',))
+
+
+def _audited_notes() -> ChildRecordService[WidgetNote]:
+    return ChildRecordService(
+        WidgetNote, 'widget_id', WidgetNote.id, audit_fields=('body',), label_field=None
+    )
+
+
+def _entries(db: SQLAlchemy) -> list[AuditLog]:
+    return list(db.session.scalars(select(AuditLog).order_by(AuditLog.id)).all())
+
+
+def test_services_without_audit_fields_write_and_register_nothing(
+    db: SQLAlchemy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(audit_log, '_AUDITED_TABLES', {})
+    widgets = CRUDService(Widget, Widget.name)
+    notes = ChildRecordService(WidgetNote, 'widget_id', WidgetNote.id)
+    widget = widgets.create({'name': 'alpha'})
+    widgets.update(widget.id, {'name': 'beta'})
+    note = notes.create(widget.id, {'body': 'one'})
+    notes.update(note, {'body': 'two'})
+    notes.delete(note)
+    widgets.delete(widget.id)
+    assert _entries(db) == []
+    assert dict(audit_log.audited_tables()) == {}
+
+
+def test_audited_create_logs_the_new_record(db: SQLAlchemy) -> None:
+    created = _audited_widgets().create({'name': 'gamma'})
+    (entry,) = _entries(db)
+    assert entry.table_name == 'widgets'
+    assert entry.record_id == created.id
+    assert entry.record_label == 'gamma'
+    assert entry.action is AuditAction.created
+    assert entry.changes == {'name': 'gamma'}
+    assert entry.changed_by_id is None
+
+
+def test_audited_service_records_the_signed_in_actor(
+    app: Flask, db: SQLAlchemy, user: User
+) -> None:
+    with app.test_request_context():
+        login_user(user)
+        _audited_widgets().create({'name': 'x'})
+    (entry,) = _entries(db)
+    assert entry.changed_by_id == user.id
+    # The fixture's application context outlives the request, and Flask-Login caches
+    # the signed-in user on it.
+    g.pop('_login_user', None)
+
+
+@pytest.mark.usefixtures('app')
+def test_audited_service_can_keep_its_history_from_non_admins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(audit_log, '_AUDITED_TABLES', {})
+    CRUDService(Widget, Widget.name, audit_fields=('name',), audit_admin_only=True)
+    assert dict(audit_log.audited_tables()) == {'widgets': True}
+
+
+def test_audited_create_entry_shares_the_records_transaction(
+    db: SQLAlchemy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_to_commit() -> None:
+        # The entry is still pending at the service's commit, so the two share one
+        # transaction; a log_created that committed early would fail here.
+        assert any(isinstance(pending, AuditLog) for pending in db.session.new)
+        raise RuntimeError('commit failed')
+
+    monkeypatch.setattr(db.session, 'commit', fail_to_commit)
+    with pytest.raises(RuntimeError, match='commit failed'):
+        _audited_widgets().create({'name': 'doomed'})
+    monkeypatch.undo()
+    db.session.rollback()
+    assert db.session.scalar(select(func.count(Widget.id))) == 0
+    assert _entries(db) == []
+
+
+def test_audited_update_logs_only_the_change(db: SQLAlchemy) -> None:
+    widget = _make_widget(db, 'alpha')
+    _audited_widgets().update(widget.id, {'name': 'beta'})
+    (entry,) = _entries(db)
+    assert entry.record_id == widget.id
+    assert entry.record_label == 'beta'
+    assert entry.action is AuditAction.updated
+    assert entry.changes == {'name': {'old': 'alpha', 'new': 'beta'}}
+
+
+def test_audited_update_that_changes_nothing_logs_nothing(db: SQLAlchemy) -> None:
+    widget = _make_widget(db, 'alpha')
+    _audited_widgets().update(widget.id, {'name': 'alpha'})
+    assert _entries(db) == []
+
+
+def test_audited_delete_logs_the_record(db: SQLAlchemy) -> None:
+    widget = _make_widget(db, 'alpha')
+    assert _audited_widgets().delete(widget.id) is True
+    (entry,) = _entries(db)
+    assert entry.record_id == widget.id
+    assert entry.record_label == 'alpha'
+    assert entry.action is AuditAction.deleted
+    assert entry.changes == {'name': 'alpha'}
+    assert db.session.get(Widget, widget.id) is None
+
+
+def test_audited_delete_refused_by_before_delete_logs_nothing(db: SQLAlchemy) -> None:
+    widget = _make_widget(db)
+    with pytest.raises(RecordInUseError):
+        RefusingAuditedService().delete(widget.id)
+    assert not [entry for entry in db.session.new if isinstance(entry, AuditLog)]
+
+
+def test_audited_child_create_update_and_delete(db: SQLAlchemy) -> None:
+    owner, other = _make_widget(db, 'owner'), _make_widget(db, 'other')
+    service = _audited_notes()
+    note = service.create(owner.id, {'body': 'one'})
+    service.update(note, {'widget_id': other.id, 'body': 'two'})
+    service.update(note, {'body': 'two'})
+    service.delete(note)
+    created, updated, deleted = _entries(db)
+    assert created.table_name == 'widget_notes'
+    assert created.record_label is None
+    assert created.action is AuditAction.created
+    assert created.changes == {'body': 'one'}
+    assert updated.action is AuditAction.updated
+    assert updated.changes == {'body': {'old': 'one', 'new': 'two'}}
+    assert deleted.action is AuditAction.deleted
+    assert deleted.changes == {'body': 'two'}
 
 
 # -- require_unique_name ------------------------------------------------------

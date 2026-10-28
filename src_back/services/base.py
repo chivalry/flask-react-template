@@ -6,11 +6,13 @@ thin: they parse the request, call the service, and serialize the result.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import ColumnExpressionArgument
 
 from src_back.extensions import Base, db
+from src_back.services.audit_log import AuditTrail
 from src_back.services.errors import DuplicateRecordError
 from src_back.utils import fold_quotes, fold_quotes_in_sql
 
@@ -50,17 +52,40 @@ class CRUDService[T: Base]:
     Subclasses may override :meth:`before_delete` for side effects that must run
     before the row is deleted, and :meth:`after_delete` for ones that must wait
     for the commit, such as removing the record's stored files.
+
+    Passing ``audit_fields`` opts the service into the audit log: :meth:`create`,
+    :meth:`update`, and :meth:`delete` each add an entry, through an
+    :class:`~src_back.services.audit_log.AuditTrail`, that their commit saves with
+    the change.
     """
 
-    def __init__(self, model: type[T], *order_by: ColumnExpressionArgument[Any]) -> None:
+    def __init__(
+        self,
+        model: type[T],
+        *order_by: ColumnExpressionArgument[Any],
+        audit_fields: Sequence[str] = (),
+        label_field: str | None = 'name',
+        audit_admin_only: bool = False,
+    ) -> None:
         """Bind the service to a model and a default ordering.
 
         Args:
             model: The ORM class this service manages.
             *order_by: Column expressions applied to every :meth:`list` query.
+            audit_fields: The columns each audit entry records; empty, the default,
+                records nothing.
+            label_field: The attribute that names a record in its audit entries;
+                ``None`` for no label. Ignored without ``audit_fields``.
+            audit_admin_only: Whether only admins may read a record's history.
+                Ignored without ``audit_fields``.
         """
         self._model = model
         self._order_by = order_by
+        self._audit = (
+            AuditTrail(model, audit_fields, label_field, admin_only=audit_admin_only)
+            if audit_fields
+            else None
+        )
 
     def list(self, **filter_by: Any) -> list[T]:
         """Return all records, optionally filtered by column equality.
@@ -102,6 +127,8 @@ class CRUDService[T: Base]:
         # TypeError, and a keyword the caller passes explicitly should win.
         record = self._model(**{**data, **extra})
         db.session.add(record)
+        if self._audit is not None:
+            self._audit.log_created(record)
         db.session.commit()
         return record
 
@@ -118,8 +145,11 @@ class CRUDService[T: Base]:
         record = db.session.get(self._model, record_id)
         if record is None:
             return None
+        before = self._audit.snapshot(record) if self._audit is not None else {}
         for key, value in data.items():
             setattr(record, key, value)
+        if self._audit is not None:
+            self._audit.log_updated(record, before)
         db.session.commit()
         return record
 
@@ -127,7 +157,9 @@ class CRUDService[T: Base]:
         """Delete a record by primary key.
 
         Calls :meth:`before_delete` before the row is removed and
-        :meth:`after_delete` once the deletion is committed.
+        :meth:`after_delete` once the deletion is committed. An audited service logs
+        the record after :meth:`before_delete`, so a ``before_delete`` that raises
+        logs nothing.
 
         Args:
             record_id: The record's primary key.
@@ -139,6 +171,8 @@ class CRUDService[T: Base]:
         if record is None:
             return False
         self.before_delete(record)
+        if self._audit is not None:
+            self._audit.log_deleted(record)
         db.session.delete(record)
         db.session.commit()
         self.after_delete(record)
@@ -172,10 +206,21 @@ class ChildRecordService[T: Base]:
     :meth:`get_for_parent` first, which is what enforces that a child can only
     be reached through the parent that owns it. :meth:`before_delete` and
     :meth:`after_delete` work as they do on :class:`CRUDService`.
+
+    Passing ``audit_fields`` opts the service into the audit log: :meth:`create`,
+    :meth:`update`, and :meth:`delete` each add an entry, through an
+    :class:`~src_back.services.audit_log.AuditTrail`, that their commit saves with
+    the change.
     """
 
     def __init__(
-        self, model: type[T], parent_fk: str, *order_by: ColumnExpressionArgument[Any]
+        self,
+        model: type[T],
+        parent_fk: str,
+        *order_by: ColumnExpressionArgument[Any],
+        audit_fields: Sequence[str] = (),
+        label_field: str | None = 'name',
+        audit_admin_only: bool = False,
     ) -> None:
         """Bind the service to a child model and its parent foreign key.
 
@@ -183,10 +228,21 @@ class ChildRecordService[T: Base]:
             model: The ORM class this service manages.
             parent_fk: The column holding the parent's primary key.
             *order_by: Column expressions applied to every :meth:`list` query.
+            audit_fields: The columns each audit entry records; empty, the default,
+                records nothing.
+            label_field: The attribute that names a record in its audit entries;
+                ``None`` for no label. Ignored without ``audit_fields``.
+            audit_admin_only: Whether only admins may read a record's history.
+                Ignored without ``audit_fields``.
         """
         self._model = model
         self._parent_fk = parent_fk
         self._order_by = order_by
+        self._audit = (
+            AuditTrail(model, audit_fields, label_field, admin_only=audit_admin_only)
+            if audit_fields
+            else None
+        )
 
     def list(self, parent_id: int) -> list[T]:
         """Return every child record belonging to the given parent.
@@ -248,6 +304,8 @@ class ChildRecordService[T: Base]:
         # parent; the URL is the authority on ownership.
         record = self._model(**{**data, **extra, self._parent_fk: parent_id})
         db.session.add(record)
+        if self._audit is not None:
+            self._audit.log_created(record)
         db.session.commit()
         return record
 
@@ -265,10 +323,13 @@ class ChildRecordService[T: Base]:
         Returns:
             The same record, updated and committed.
         """
+        before = self._audit.snapshot(record) if self._audit is not None else {}
         for key, value in data.items():
             if key == self._parent_fk:
                 continue
             setattr(record, key, value)
+        if self._audit is not None:
+            self._audit.log_updated(record, before)
         db.session.commit()
         return record
 
@@ -277,12 +338,16 @@ class ChildRecordService[T: Base]:
 
         Calls :meth:`before_delete` before the row is removed and
         :meth:`after_delete` once the deletion is committed. Existence was
-        already established by :meth:`get_for_parent`, so nothing is returned.
+        already established by :meth:`get_for_parent`, so nothing is returned. An
+        audited service logs the record after :meth:`before_delete`, so a
+        ``before_delete`` that raises logs nothing.
 
         Args:
             record: The record returned by :meth:`get_for_parent`.
         """
         self.before_delete(record)
+        if self._audit is not None:
+            self._audit.log_deleted(record)
         db.session.delete(record)
         db.session.commit()
         self.after_delete(record)

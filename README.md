@@ -203,7 +203,7 @@ project/
 │   ├── extensions.py  # db (SQLAlchemy 2 Base), migrate, login_manager
 │   ├── models/        # Package: base.py has BaseMixin, user.py has Role and User
 │   ├── utils.py       # Error envelopes, pagination, parsing, upload checks
-│   ├── api/           # Blueprints (health, auth, users)
+│   ├── api/           # Blueprints (health, auth, users, audit logs)
 │   ├── schemas/       # Marshmallow schemas; base.py has BaseSchema
 │   ├── services/      # Business logic; base.py has the generic CRUD services
 │   ├── seed.py        # Idempotent seed; creates the first admin

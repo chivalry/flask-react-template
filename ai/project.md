@@ -9,14 +9,16 @@ that every contributor and agent follows.
 - Backend: `src_back/` - Python/Flask
     - `api/` - Flask route handlers, one blueprint per domain
     - `models/` - SQLAlchemy models, one module per domain; `base.py` holds
-      `BaseMixin`, `user.py` holds `Role` and `User`, and `__init__.py` re-exports every
-      model, so `from src_back.models import User` works and every table registers
+      `BaseMixin`, `user.py` holds `Role` and `User`, `audit_log.py` holds `AuditAction`
+      and `AuditLog`, and `__init__.py` re-exports every model, so
+      `from src_back.models import User` works and every table registers
     - `schemas/` - Marshmallow schemas; `schemas/base.py` holds `BaseSchema` and
       `validate_ids_exist()`
     - `services/` - business logic by domain; `services/base.py` holds the generic
       `CRUDService`, `ChildRecordService`, and `require_unique_name()`,
-      `services/errors.py` the exceptions services raise, and `services/users.py` the
-      admin's account management
+      `services/errors.py` the exceptions services raise, `services/audit_log.py` the
+      audit trail and the history queries, and `services/users.py` the admin's account
+      management
     - `tests/` - pytest; one `test_<module>.py` per module; `helpers.py` holds
       `persist()`
     - `app.py` - application factory, error handlers, SPA and upload serving

@@ -2,6 +2,9 @@
 
 There is no delete. An account is deactivated instead, which keeps the rows that
 reference it intact.
+
+Every change is audited through :data:`~src_back.services.auth.USER_AUDIT_TRAIL`, with
+the admin as the actor.
 """
 
 from typing import Any
@@ -9,8 +12,9 @@ from typing import Any
 from sqlalchemy import Select, select
 
 from src_back.extensions import db
-from src_back.models import Role, User
-from src_back.services.auth import find_user_by_email
+from src_back.models import AuditAction, Role, User
+from src_back.services.audit_log import MASKED_VALUE, diff
+from src_back.services.auth import USER_AUDIT_TRAIL, find_user_by_email
 from src_back.services.errors import DuplicateRecordError, SelfModificationError
 
 EMAIL_IN_USE = 'Email already in use.'
@@ -80,12 +84,16 @@ def create_user(data: dict[str, Any]) -> User:
     user = User(email=data['email'], role=data['role'], is_active=data['is_active'])
     user.set_password(data['password'])
     db.session.add(user)
+    USER_AUDIT_TRAIL.log_created(user)
     db.session.commit()
     return user
 
 
 def update_user(user_id: int, data: dict[str, Any], actor_id: int) -> User | None:
     """Apply the admin's changes to an account.
+
+    The audit entry lists only what changed; a new password shows as
+    ``MASKED_VALUE``, with no old value for an account that had no password.
 
     Args:
         user_id: The account's primary key.
@@ -107,10 +115,16 @@ def update_user(user_id: int, data: dict[str, Any], actor_id: int) -> User | Non
         raise SelfModificationError(SELF_MODIFICATION)
     if 'email' in data and _is_email_taken(data['email'], except_user_id=user_id):
         raise DuplicateRecordError(EMAIL_IN_USE)
+    before = USER_AUDIT_TRAIL.snapshot(user)
     for key in ('email', 'role', 'is_active'):
         if key in data:
             setattr(user, key, data[key])
+    changes = diff(before, USER_AUDIT_TRAIL.snapshot(user))
     if 'password' in data:
+        # Record that the password changed, never a password or its hash.
+        old_password = MASKED_VALUE if user.has_password else None
         user.set_password(data['password'])
+        changes['password'] = {'old': old_password, 'new': MASKED_VALUE}
+    USER_AUDIT_TRAIL.log(user, AuditAction.updated, changes)
     db.session.commit()
     return user

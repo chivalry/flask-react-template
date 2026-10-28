@@ -5,7 +5,8 @@ Importing this package registers every table on the shared metadata, which is wh
 here and its classes are added to ``__all__``.
 """
 
+from src_back.models.audit_log import AuditAction, AuditLog
 from src_back.models.base import BaseMixin
 from src_back.models.user import Role, User
 
-__all__ = ['BaseMixin', 'Role', 'User']
+__all__ = ['AuditAction', 'AuditLog', 'BaseMixin', 'Role', 'User']
