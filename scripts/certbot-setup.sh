@@ -15,6 +15,11 @@
 # expired the production certificate after 66 consecutive silent failures. The renewal
 # config is therefore switched to the nginx authenticator immediately after issuance
 # and verified before this script reports success.
+#
+# A later certificate on a host whose nginx already serves a site, such as staging's
+# beside production's, goes through the running nginx with --nginx instead. Nothing is
+# stopped, so production stays up. The first certificate on a bare host keeps the
+# standalone path and the renewal switch described above.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,7 +76,7 @@ fi
 STOPPED_SERVICES=()
 restore_services() {
   local service
-  for service in "${STOPPED_SERVICES[@]}"; do
+  for service in ${STOPPED_SERVICES[@]+"${STOPPED_SERVICES[@]}"}; do
     echo "==> Starting $service again..."
     sudo systemctl start "$service" \
       || echo "WARN: could not start $service; run: sudo systemctl start $service"
@@ -79,17 +84,30 @@ restore_services() {
 }
 trap restore_services EXIT
 
-echo "==> Stopping any service on port 80..."
-for service in nginx apache2; do
-  if sudo systemctl is-active --quiet "$service"; then
-    sudo systemctl stop "$service"
-    STOPPED_SERVICES+=("$service")
-  fi
-done
+# nginx_serves_a_site -> nginx is running with at least one enabled site, as on a
+# host that already serves production. provision.sh removes the default site, so a
+# bare host has none and still needs standalone.
+nginx_serves_a_site() {
+  sudo systemctl is-active --quiet nginx &&
+    [ -n "$(ls -A /etc/nginx/sites-enabled 2>/dev/null)" ]
+}
 
-echo "==> Requesting certificate..."
-sudo certbot certonly --standalone -d "$DOMAIN" \
-  --non-interactive --agree-tos -m "$EMAIL"
+if nginx_serves_a_site; then
+  echo "==> nginx already serves a site; requesting the certificate through it..."
+  sudo certbot certonly --nginx -d "$DOMAIN" \
+    --non-interactive --agree-tos -m "$EMAIL"
+else
+  echo "==> Stopping any service on port 80..."
+  for service in nginx apache2; do
+    if sudo systemctl is-active --quiet "$service"; then
+      sudo systemctl stop "$service"
+      STOPPED_SERVICES+=("$service")
+    fi
+  done
+  echo "==> Requesting certificate..."
+  sudo certbot certonly --standalone -d "$DOMAIN" \
+    --non-interactive --agree-tos -m "$EMAIL"
+fi
 
 RENEWAL_CONF="/etc/letsencrypt/renewal/$DOMAIN.conf"
 echo "==> Switching renewal to the nginx authenticator..."

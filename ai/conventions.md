@@ -223,6 +223,15 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 ## Git
 
 - `plans/` holds implementation plans; move finished plans to `plans/archive/`.
-- Review diffs use `origin/main...HEAD` unless the project adopts a staging branch, in
-  which case record the base here.
+- `staging` is the default branch. Feature branches fork from `origin/staging`, PRs
+  target it, and review diffs use `origin/staging...HEAD`.
+- A release is a PR from `staging` into `main`, merged with "Create a merge commit".
+  Never squash or rebase it: both rewrite staging's commits, so `main` would stop
+  containing them and every later release would conflict. After the merge,
+  `git diff origin/staging origin/main` must print nothing.
+- A hotfix branches from `origin/main` and targets `main`. Bring it back into `staging`
+  through a throwaway branch cut from `origin/main` (`ai/staging.md`, "Branches and
+  releases"), never with `main` as a PR's head, since merged head branches are deleted.
+- Issues close when their PR merges into `staging`, before they reach production:
+  GitHub honors closing keywords only on the default branch.
 - Commits and pushes are the user's; never run them unasked.

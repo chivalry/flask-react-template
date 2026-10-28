@@ -9,6 +9,7 @@ import { Suspense } from 'react'
 import type { ReactNode } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
+import { APP_TITLE } from '../../appTitle'
 import { useAuthStore } from '../../store/auth'
 import { isAdmin } from '../../types/auth'
 
@@ -142,7 +143,7 @@ export default function AppShell() {
                         component="div"
                         sx={{ mr: { xs: 0.5, sm: 2 } }}
                     >
-                        Flask React Template
+                        {APP_TITLE}
                     </Typography>
                     <NavLinks />
                     <Box sx={{ flexGrow: 1 }} />

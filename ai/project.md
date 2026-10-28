@@ -43,9 +43,10 @@ that every contributor and agent follows.
 - `docker/` - Dockerfiles, entrypoint, nginx config, production Compose override
 - `migrations/` - Alembic migrations
 - `plans/` - implementation plans; authoritative while a feature is in progress
-- `scripts/` - local tooling (ports, worktrees) and server provisioning, deployment,
-  TLS, and backup scripts; `scripts/tests/` holds the shell-script tests and
-  `run-all.sh`, which checks every script's syntax and then runs them
+- `scripts/` - local tooling (ports, worktrees) and server provisioning, deployment
+  (production and staging), TLS, and backup scripts; `scripts/tests/` holds the
+  shell-script tests and `run-all.sh`, which checks every script's syntax and then runs
+  them
 - `tools.md` - why each tool and library is in the repository
 
 ## Commands
@@ -75,6 +76,7 @@ for the reloader only when the dev stack builds it.
 - `npm run docker:seed` - run the seed inside the backend container
 - `npm run docker:down` - stop the dev stack
 - `npm run deploy` - deploy production over SSH (`DEPLOY_HOST` or an argument)
+- `npm run deploy:staging` - deploy the staging clone the same way (`ai/staging.md`)
 
 ## Database
 
@@ -101,9 +103,9 @@ for the reloader only when the dev stack builds it.
   also sees added and deleted modules. The dev stack syncs `migrations/` into the
   backend without restarting its container, so a generated revision is applied by
   `db upgrade` or at the next backend start, never by the sync. `scripts/deploy.sh`
-  never runs `db upgrade` itself; it takes a database backup, restarts the stack, and
-  waits for `/api/health`, which the backend serves only after the entrypoint
-  finishes. This assumes one backend container; scaling it out means moving
+  never runs `db upgrade` itself; it takes a database backup in production, restarts
+  the stack, and waits for `/api/health`, which the backend serves only after the
+  entrypoint finishes. This assumes one backend container; scaling it out means moving
   migrations into the deploy step.
 - Run `flask` inside the container or through the venv, never with the system Python:
   `docker compose exec -T backend flask --app src_back.app db upgrade` or
@@ -122,16 +124,21 @@ and passkeys disabled. The seed creates the first admin from `ADMIN_EMAIL` and
 and never changes an existing account; `scripts/provision.sh` generates `ADMIN_PASSWORD`
 and leaves `ADMIN_EMAIL` blank to fill in before the first deploy.
 
+`.env.staging.example` is a whole staging `.env` (`ai/staging.md`). `APP_ENVIRONMENT`
+names the deployment, production when blank. `/api/health` reports it, the frontend
+badges every page outside production, and any other environment names its own session
+cookie. `DEPLOY_BRANCH` is the branch a server clone must be on.
+
 `src_back/app.py` calls `load_dotenv()` at import, so `.env` values are visible to pytest
 too. A test that depends on an environment variable sets or clears it with
 `monkeypatch` first, as the `FLASK_ENV` and `CORS_ALLOWED_ORIGINS` tests in
-`src_back/tests/test_app.py` do.
+`src_back/tests/test_app.py` do; `conftest.py` clears `APP_ENVIRONMENT` for every test.
 
 ## Worktrees
 
 When the clone is a bare-repo container (README, Worktrees), `main/` stays on `main`
 and each issue gets a sibling worktree with its own `.env`, `COMPOSE_PROJECT_NAME`,
 ports, `.venv`, and `node_modules`; `/plan-issue` and `/plan-pr` create it through
-`scripts/worktree-setup.sh`. Run every session inside a worktree, never in the
-container directory, which has no project settings, hooks, or scripts. Never check an
-issue branch out in `main/`.
+`scripts/worktree-setup.sh`, which forks a new branch from `origin/staging`. Run every
+session inside a worktree, never in the container directory, which has no project
+settings, hooks, or scripts. Never check an issue branch out in `main/`.

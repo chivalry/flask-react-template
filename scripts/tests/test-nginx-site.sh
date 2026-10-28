@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Run scripts/nginx-ssl.conf.template in a real nginx, rendered for two apps on one
+# Run scripts/nginx-ssl.conf.template in a real nginx, rendered for three apps on one
 # host as scripts/deploy.sh renders it, beside stub upstreams and a throwaway
-# certificate per domain. It checks that nginx accepts both sites; that a page, an API
-# answer, and nginx's own 429 all carry the four security headers; that sign-in POSTs
-# are throttled per app with a JSON 429, while GETs and other API POSTs never are; and
-# that the throttled location forwards the same proxy headers as the other API paths.
+# certificate per domain. It checks that nginx accepts all three sites; that a page, an
+# API answer, and nginx's own 429 all carry the four security headers; that sign-in
+# POSTs are throttled per app with a JSON 429, while GETs and other API POSTs never are;
+# that the throttled location forwards the same proxy headers as the other API paths;
+# and that the site rendered with basic auth answers 401 to every page and API call
+# until it gets the password.
 # It needs a running Docker daemon, curl, and openssl; without them it exits 77, which
 # scripts/tests/run-all.sh counts as a skip outside CI. It runs under macOS's bash 3.2
 # and on Linux.
@@ -34,11 +36,18 @@ fail() {
   exit 1
 }
 
-# Two apps on one host, each rendered as deploy.sh renders the template and each with
-# its own certificate. Both proxy to the stub upstreams below.
-for app in alpha beta; do
+# Three apps on one host, each rendered as deploy.sh renders the template and each with
+# its own certificate, and gamma behind basic auth. All proxy to the stub upstreams
+# below.
+for app in alpha beta gamma; do
+  basic_auth=''
+  if [ "$app" = gamma ]; then
+    basic_auth="auth_basic \"$app\";"
+    basic_auth="$basic_auth auth_basic_user_file /etc/nginx/conf.d/$app.htpasswd;"
+  fi
   sed -e "s|__APP_NAME__|$app|g" -e "s|__DOMAIN__|$app.test|g" \
     -e 's|__BACKEND_PORT__|5000|g' -e 's|__FRONTEND_HOST_PORT__|8080|g' \
+    -e "s|__BASIC_AUTH__|$basic_auth|g" \
     "$REPO_DIR/scripts/nginx-ssl.conf.template" > "$TEST_DIR/conf.d/$app.conf"
   if grep -Eq '__[A-Z_]+__' "$TEST_DIR/conf.d/$app.conf"; then
     fail "A placeholder is left in the $app site; render it as deploy.sh does."
@@ -48,6 +57,13 @@ for app in alpha beta; do
     -keyout "$TEST_DIR/letsencrypt/live/$app.test/privkey.pem" \
     -out "$TEST_DIR/letsencrypt/live/$app.test/fullchain.pem" > /dev/null 2>&1
 done
+# gamma's password file, in nginx's built-in {PLAIN} scheme, which needs no htpasswd
+# tool; conf.d/*.conf never includes it. nginx's worker (uid 101) opens the file on every
+# request through the read-only mount, unlike the files the root master reads at
+# startup, so a strict umask would turn the 401 into a 500.
+printf 'tester:{PLAIN}secret\n' > "$TEST_DIR/conf.d/gamma.htpasswd"
+chmod 755 "$TEST_DIR/conf.d"
+chmod 644 "$TEST_DIR/conf.d/gamma.htpasswd"
 # Stand-ins for the backend and the frontend container on their loopback ports. The
 # backend answers with the proxy headers it received.
 cat > "$TEST_DIR/conf.d/upstreams.conf" <<'NGINX'
@@ -144,5 +160,19 @@ API_PROXY_HEADERS=$(cat "$TEST_DIR/body")
   fail "One app's sign-in attempts throttled another's."
 [ "$(cat "$TEST_DIR/body")" = "$API_PROXY_HEADERS" ] ||
   fail 'The throttled location forwards other proxy headers than the API location.'
+
+# gamma sits behind basic auth: a page and an API call both answer 401, with the realm
+# and the security headers, until the request carries the password; alpha answered 200
+# above without credentials.
+[ "$(fetch gamma /)" = 401 ] ||
+  fail 'A page behind basic auth did not ask for a password.'
+assert_security_headers
+assert_header WWW-Authenticate 'Basic realm="gamma"'
+[ "$(fetch gamma /api/health)" = 401 ] ||
+  fail 'An API call behind basic auth did not ask for a password.'
+[ "$(fetch gamma / -u tester:secret)" = 200 ] ||
+  fail 'The password did not open a page behind basic auth.'
+[ "$(fetch gamma /api/health -u tester:secret)" = 200 ] ||
+  fail 'The password did not open an API call behind basic auth.'
 
 echo 'nginx site checks passed.'

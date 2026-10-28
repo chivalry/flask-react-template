@@ -185,6 +185,17 @@ expect_failure 'an empty APP_NAME to fail the run'
 assert_contains 'ERROR: APP_NAME is empty' "$OUTPUT"
 expect_no_calls
 
+# The rclone remote is host-wide, so a clone that deploys any other environment, staging
+# or qa alike, stops before it writes the remote, which would replace production's, or
+# runs anything.
+for environment in staging qa; do
+  start_test_case "APP_ENVIRONMENT=$environment"
+  expect_failure "a $environment clone to fail the run"
+  assert_contains 'backups belong to production' "$OUTPUT"
+  expect_no_calls
+  assert_file_count 0 "$TEST_DIR/rclone" 'rclone.conf'
+done
+
 # A bucket the credentials cannot list stops the run at the listing: no probe, no units,
 # and no systemd call. The message says what still works, since deploys enable the timers.
 start_test_case

@@ -4,6 +4,7 @@ import type { AxiosResponse } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { me } from '../api/auth'
+import { getHealth } from '../api/health'
 import { usersApi } from '../api/users'
 import App from '../App'
 import { useAuthStore } from '../store/auth'
@@ -12,6 +13,7 @@ import { adminUser, plainUser } from './utils/fixtures'
 import Providers from './utils/Providers'
 
 vi.mock('../api/auth')
+vi.mock('../api/health')
 vi.mock('../api/users')
 
 // The app reads the query client from context, so it renders inside the test providers.
@@ -39,6 +41,7 @@ describe('App', () => {
         vi.clearAllMocks()
         useAuthStore.setState({ user: null, isLoading: true })
         vi.mocked(usersApi.list).mockResolvedValue([adminUser, plainUser])
+        vi.mocked(getHealth).mockReturnValue(new Promise(() => undefined))
     })
 
     it('asks the server who is signed in on mount', async () => {
@@ -137,5 +140,19 @@ describe('App', () => {
             await screen.findByRole('heading', { name: 'Create account' }),
         ).toBeInTheDocument()
         await waitFor(() => expect(useAuthStore.getState().isLoading).toBe(false))
+    })
+
+    it('shows the environment badge on the sign-in page', async () => {
+        signedOut()
+        vi.mocked(getHealth).mockResolvedValue({
+            data: { status: 'ok', environment: 'staging' },
+        } as AxiosResponse)
+
+        renderAppAtPath('/login')
+
+        expect(await screen.findByRole('status')).toHaveTextContent('STAGING')
+        expect(
+            await screen.findByRole('heading', { name: 'Sign in' }),
+        ).toBeInTheDocument()
     })
 })

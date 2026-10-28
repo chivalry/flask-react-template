@@ -51,6 +51,13 @@ class SpaTestClient(FlaskClient):
         self.environ_base['HTTP_X_REQUESTED_WITH'] = 'XMLHttpRequest'
 
 
+@pytest.fixture(autouse=True)
+def _clear_app_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    # src_back.app loads .env at import; a developer's APP_ENVIRONMENT would rename the
+    # session cookie that test_auth.py reads.
+    monkeypatch.delenv('APP_ENVIRONMENT', raising=False)
+
+
 @pytest.fixture()
 def app(tmp_path: Path) -> Iterator[Flask]:
     app = create_app(

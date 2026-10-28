@@ -226,9 +226,10 @@ The `devDependencies` in `package.json`.
   renders for each stack with it. The CI runner has it; locally, the test skips
   without it or without the docker CLI.
 - **Docker daemon, curl, and openssl**: `test-nginx-site.sh` runs the host site template,
-  rendered for two apps, in `nginx:1.27-alpine` with throwaway certificates and sends it
-  requests with curl; `test-backend-image.sh` builds the backend image and runs it beside
-  `alpine`. The CI runner has all three; locally, each test skips without them.
+  rendered for three apps, one behind basic auth, in `nginx:1.27-alpine` with throwaway
+  certificates and sends it requests with curl; `test-backend-image.sh` builds the
+  backend image and runs it beside `alpine`. The CI runner has all three; locally, each
+  test skips without them.
 
 ## Containers and images
 
@@ -265,7 +266,8 @@ The `devDependencies` in `package.json`.
   tag.
 - **`alpine`**: the throwaway container `scripts/backup.sh` mounts the uploads volume
   into to archive it; the restore steps in `ai/backups.md` use it the same way.
-  `scripts/deploy.sh` uses it to hand the uploads volume to the backend's user, and
+  `scripts/deploy.sh` uses it to hand the uploads volume to the backend's user,
+  `scripts/copy-production.sh` to copy production's uploads volume into staging's, and
   `test-backend-image.sh` to stand in for an old volume.
 
 ## GitHub
@@ -289,25 +291,26 @@ The `devDependencies` in `package.json`.
 ## Servers and operations
 
 The server's packages come from `scripts/provision.sh` and `scripts/install-backup.sh`;
-`scripts/deploy.sh` installs the nginx site, the renewal hook, and the monitoring,
-backup, and restore-drill units.
+`scripts/deploy.sh` installs the nginx site and, in production only, the renewal hook
+and the monitoring, backup, and restore-drill units.
 
 - **Ubuntu**: the production server's operating system. `scripts/provision.sh`
   installs every package with apt.
 - **Host nginx**: the reverse proxy in front of the stack. The site rendered from
   `scripts/nginx-ssl.conf.template` redirects HTTP to HTTPS, terminates TLS, sends the
-  security headers, throttles sign-in POSTs, and proxies to the loopback ports Compose
-  publishes; every deploy rewrites it. nginx arrives as a dependency of
-  `python3-certbot-nginx`.
-- **Certbot and Let's Encrypt**: issue and renew the certificate. The first issuance
-  uses the standalone authenticator; the renewal config is then switched to the nginx
-  authenticator from `python3-certbot-nginx`, because standalone cannot bind port 80
-  while nginx holds it. The packaged `certbot.timer` attempts renewal twice a day, and
-  a deploy hook reloads nginx after each renewal. See `ai/tls.md`.
+  security headers, asks for a password when `STAGING_HTPASSWD` is set, throttles
+  sign-in POSTs, and proxies to the loopback ports Compose publishes; every deploy
+  rewrites it. nginx arrives as a dependency of `python3-certbot-nginx`.
+- **Certbot and Let's Encrypt**: issue and renew the certificates. The first issuance
+  on a bare host uses the standalone authenticator, and its renewal config is then
+  switched to the nginx authenticator from `python3-certbot-nginx`, because standalone
+  cannot bind port 80 while nginx holds it. A later issuance goes through the running
+  nginx. The packaged `certbot.timer` attempts renewal twice a day, and a deploy hook
+  reloads nginx after each renewal. See `ai/tls.md`.
 - **systemd**: the units and timers under `scripts/systemd/`: the nightly backup at
   02:30 UTC, the weekly restore drill on Sundays at 04:00 UTC, the daily certificate
   expiry check at 05:00 UTC, and the units that `OnFailure=` starts to report a failed
-  certbot renewal and a failed or timed-out drill. `scripts/deploy.sh` installs them
+  certbot renewal and a failed or timed-out drill. A production deploy installs them
   all, and `scripts/install-backup.sh` installs the backup and drill units too. The
   scripts render their `__APP_NAME__` and `__REPO_DIR__` placeholders so several apps
   can share a host.
@@ -317,12 +320,16 @@ backup, and restore-drill units.
   the same run from it. `scripts/install-backup.sh` installs it and writes its remote
   from `.env`.
 - **pg_dump and pg_restore**: run inside the database container. Every backup is a
-  custom-format `pg_dump`, as is the dump each deploy takes before migrating, which is
-  named for the commit that was running. The manual recovery in `ai/backups.md`
-  restores one with `pg_restore`, and the restore drill restores the newest daily dump
-  into a scratch container every week.
+  custom-format `pg_dump`, as is the dump each production deploy takes before migrating,
+  which is named for the commit that was running. The manual recovery in
+  `ai/backups.md` restores one with `pg_restore`, and the restore drill restores the
+  newest daily dump into a scratch container every week. `scripts/copy-production.sh`
+  pipes a `pg_dump` of production's database into staging's database container, where
+  `pg_restore` turns it into SQL that `psql` runs in one transaction.
 - **OpenSSL**: generates the database password and Flask's secret key when a server is
-  provisioned, and reads certificate expiry dates in `scripts/cert-check.sh`.
+  provisioned, hashes the password in staging's nginx password file with
+  `openssl passwd -6` (`ai/staging.md`), and reads certificate expiry dates in
+  `scripts/cert-check.sh`.
 - **curl**: fetches Docker's apt signing key, asks `api.ipify.org` for the server's
   public address before certbot runs, waits for the backend's health endpoint during
   deploys, and delivers alerts to the webhook.
@@ -332,14 +339,15 @@ backup, and restore-drill units.
   backups, failed restore drills, failed renewals, and expiring certificates.
   `ALERT_WEBHOOK_FORMAT` picks the payload shape, and the server's `python3` escapes
   the Slack and Discord JSON. With no URL set, alerts are only logged.
-- **git**: the server runs from a clone of the repository, and every deploy pulls into
-  it.
+- **git**: the server runs from a clone of the repository, and every deploy first
+  checks that the clone is on `DEPLOY_BRANCH`, then pulls into it.
 - **Vim**: the editor for reviewing the generated `.env` on the server and filling in
   values such as the `SPACES_*` credentials.
 - **ca-certificates**: the root certificates apt and curl check HTTPS against, which
   Docker's apt repository and signing key need.
-- **SSH**: `npm run deploy` runs `scripts/deploy.sh` on the server over SSH, through
-  `scripts/remote-deploy.sh`.
+- **SSH**: `npm run deploy` and `npm run deploy:staging` run `scripts/deploy.sh` on the
+  server over SSH, through `scripts/remote-deploy.sh`, in the production or the staging
+  clone.
 - **lsof**: finds free host ports. `scripts/up.sh` moves a busy port to the next free
   one before it starts the dev stack, and `scripts/worktree-setup.sh` skips offsets
   whose ports are in use.

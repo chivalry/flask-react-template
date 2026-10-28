@@ -371,3 +371,20 @@ def test_webauthn_rp_name_falls_back_to_app_name_then_the_template_name(
     monkeypatch.setenv('APP_NAME', app_name)
     app = create_app({'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
     assert app.config['WEBAUTHN_RP_NAME'] == expected
+
+
+@pytest.mark.parametrize(
+    ('environment', 'cookie_name'),
+    [
+        ('', 'session'),
+        ('production', 'session'),
+        ('staging', 'staging_session'),
+        ('qa', 'qa_session'),
+    ],
+)
+def test_only_production_keeps_flasks_session_cookie_name(
+    monkeypatch: pytest.MonkeyPatch, environment: str, cookie_name: str
+) -> None:
+    monkeypatch.setenv('APP_ENVIRONMENT', environment)
+    app = create_app({'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
+    assert app.config['SESSION_COOKIE_NAME'] == cookie_name

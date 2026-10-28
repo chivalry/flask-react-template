@@ -3,7 +3,8 @@
 A full-stack starting point: **Flask** (Python) backend and **React 19** (TypeScript +
 Vite) frontend, with session authentication, image-upload scaffolding, 100% test
 coverage on both sides, strict linting and typing, Docker for development and
-production, and scripts to provision and deploy a single server.
+production, and scripts to provision and deploy a single server, with an optional
+staging stack beside production.
 
 ## Stack
 
@@ -27,15 +28,22 @@ placeholders:
   `package-lock.json`, and `name` in `.devcontainer/devcontainer.json`
 - `COMPOSE_PROJECT_NAME` and `APP_NAME` in `.env.example`, and in `.env` if it already
   exists
+- `APP_NAME`, `COMPOSE_PROJECT_NAME`, `PRODUCTION_DIR`, `STAGING_HTPASSWD`, and
+  `WEBAUTHN_RP_NAME` in `.env.staging.example`, which carry the template's name
 - the fallback project name on the first line of `docker-compose.yml`
 - `Flask React Template`, the last fallback for `WEBAUTHN_RP_NAME` in `src_back/app.py`,
   and the test that expects it in `src_back/tests/test_app.py`
 - the `<title>` in `src_front/index.html`
-- the app bar title in `src_front/src/components/layout/AppShell.tsx`, and the tests
-  that expect it, `src_front/src/test/App.test.tsx` and
+- `APP_TITLE` in `src_front/src/appTitle.ts`, which the app bar and the tab title use,
+  and the tests that expect it, `src_front/src/test/App.test.tsx` and
   `src_front/src/test/components/layout/AppShell.test.tsx`
 - this README's title and the `my-app` placeholders in its commands
 - the placeholder paragraphs at the top of `ai/project.md` and `ai/domain.md`
+
+GitHub copies only the default branch, `staging`, to a repository created from the
+template, unless "Include all branches" is ticked. Create `main` from it
+(`git push origin origin/staging:refs/heads/main`), keep `staging` as the default
+branch, and see `ai/staging.md`.
 
 `plans/archive/` holds the template's own finished plans. Delete them if the new project
 should start without that history; `plans/archive/.gitkeep` keeps the folder.
@@ -147,7 +155,8 @@ Each further branch gets its own worktree, created from the container directory:
 sh main/scripts/worktree-setup.sh issue-12-some-slug
 ```
 
-`scripts/worktree-setup.sh` creates the worktree, copies `.env` from `main/`, gives the
+`scripts/worktree-setup.sh` creates the worktree on a new branch from `origin/staging`
+(or `origin/main` where there is no `staging`), copies `.env` from `main/`, gives the
 stack its own `COMPOSE_PROJECT_NAME`, and shifts its ports by the smallest offset that
 no other worktree's `.env` reserves and nothing is listening on; a second argument sets
 the offset instead. It then installs the venv and `node_modules`, and `npm install`
@@ -191,6 +200,7 @@ git branch -D issue-12-some-slug
 | `npm run docker:down`    | Stop and remove containers                      |
 | `npm run docker:prod:up` | Start the production stack locally              |
 | `npm run deploy`         | Deploy to `DEPLOY_HOST` (or a host argument)    |
+| `npm run deploy:staging` | Deploy the staging clone (`ai/staging.md`)      |
 
 ## Project layout
 
@@ -250,10 +260,10 @@ venv is supported, but does not permit syntax newer than the deployed runtime.
 ## Agent instructions
 
 `ai/project.md`, `ai/conventions.md`, and `ai/domain.md` are the canonical project
-instructions; `ai/auth.md`, `ai/backups.md`, and `ai/tls.md` are the operations
-runbooks. `AGENTS.md` and `.claude/CLAUDE.md` are thin adapters that point at them.
-`.claude/settings.json` runs `tsc -b` after every TypeScript edit and assigns new GitHub
-issues to the repository owner.
+instructions; `ai/auth.md`, `ai/backups.md`, `ai/tls.md`, and `ai/staging.md` are the
+operations runbooks. `AGENTS.md` and `.claude/CLAUDE.md` are thin adapters that point at
+them. `.claude/settings.json` runs `tsc -b` after every TypeScript edit and assigns new
+GitHub issues to the repository owner.
 
 ## Uploads
 
@@ -278,6 +288,13 @@ docker run --rm -v <COMPOSE_PROJECT_NAME>_uploads_data:/uploads alpine \
   chown -R 10001:10001 /uploads
 ```
 
+## Branches and releases
+
+`staging` is the default branch: feature branches fork from it and their PRs merge into
+it. A release is a PR from `staging` into `main`, merged with a merge commit, and
+production then deploys `main`. `ai/conventions.md` holds the rules, and
+`ai/staging.md` the commands and the staging server.
+
 ## Deployment
 
 The production stack runs on one Ubuntu host behind host nginx with Let's Encrypt.
@@ -288,18 +305,22 @@ nginx also sends the security headers and throttles sign-in attempts; `ai/tls.md
 On the server:
 
 ```bash
-git clone <your-repo-url> ~/my-app && cd ~/my-app
+git clone --branch main <your-repo-url> ~/my-app && cd ~/my-app
 bash scripts/provision.sh example.com                # packages, Docker, nginx, .env
 bash scripts/certbot-setup.sh --email you@example.com  # first certificate, after DNS
 ```
 
 `provision.sh` writes `.env` with generated secrets; review it before deploying.
 
-Then, from your machine, `DEPLOY_HOST=root@example.com npm run deploy`.
-`scripts/deploy.sh` backs up the database before migrating, hands the uploads volume to
-the backend's unprivileged user, rebuilds the containers, installs the nginx site, and
-enables certificate monitoring, nightly backups kept on the server, and a weekly drill
-that restores the newest one. Once the `SPACES_*` variables are filled in,
-`bash scripts/install-backup.sh` adds off-site copies in a bucket.
-Failures alert through `ALERT_WEBHOOK_URL`; `ai/backups.md` and `ai/tls.md` cover
-restores, alerts, and renewals.
+Then, from your machine, `DEPLOY_HOST=root@example.com npm run deploy`;
+`npm run deploy:staging` deploys the staging clone the same way. `scripts/deploy.sh`
+first refuses a clone on the wrong branch or in the wrong environment: production
+deploys `main`, and a plain clone checks out `staging`, the default branch. It then
+backs up the database before migrating, hands the uploads volume to the backend's
+unprivileged user, rebuilds the containers, installs the nginx site, and enables
+certificate monitoring, nightly backups kept on the server, and a weekly drill that
+restores the newest one. A staging deploy skips the backup, the renewal hook, and the
+timers. Once the `SPACES_*` variables are filled in, `bash scripts/install-backup.sh`
+adds off-site copies in a bucket. Failures alert through `ALERT_WEBHOOK_URL`;
+`ai/backups.md` and `ai/tls.md` cover restores, alerts, and renewals. `ai/staging.md`
+covers running staging beside production.

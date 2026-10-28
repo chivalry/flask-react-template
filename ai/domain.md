@@ -40,6 +40,8 @@ to put new behavior in the right service.
 - `Widget` and `WidgetNote` - test-only models exercising the generic services and
   `BaseSchema`; `test_base_service.py` builds audited services over them
 - `PNG_BYTES` - a minimal PNG for upload tests
+- `_clear_app_environment` - an autouse fixture that clears `APP_ENVIRONMENT`, so a
+  developer's `.env` cannot rename the session cookie
 
 The `app` fixture sets `app.test_client_class` to `SpaTestClient`, so every client the
 tests build, `app.test_client()` included, sends `X-Requested-With: XMLHttpRequest` as

@@ -1,6 +1,7 @@
 # Host nginx site for the production stack. scripts/deploy.sh renders __APP_NAME__,
-# __DOMAIN__, __BACKEND_PORT__, and __FRONTEND_HOST_PORT__ from .env and installs the
-# result as /etc/nginx/sites-available/<APP_NAME>. Do not edit the installed copy; it is
+# __DOMAIN__, __BACKEND_PORT__, and __FRONTEND_HOST_PORT__ from .env, fills the
+# basic-auth line in the HTTPS server from STAGING_HTPASSWD, and installs the result as
+# /etc/nginx/sites-available/<APP_NAME>. Do not edit the installed copy; it is
 # overwritten on every deploy. scripts/tests/test-nginx-site.sh runs it in a real nginx.
 
 # Sign-in throttling for the /api/v1/auth/ location below. Only a POST gets a key, and
@@ -38,6 +39,11 @@ server {
     add_header Content-Security-Policy "frame-ancestors 'none'" always;
 
     client_max_body_size 25m;
+
+    # deploy.sh fills the next line with the basic-auth directives when .env sets
+    # STAGING_HTPASSWD, so every page and API call asks for a password, and leaves it
+    # blank otherwise. nginx's 401 carries the security headers above as well.
+    __BASIC_AUTH__
 
     # nginx rejects oversized bodies itself; answer with the application's JSON 413
     # envelope instead of the default HTML page. Browsers may still report a reset
