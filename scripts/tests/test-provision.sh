@@ -147,6 +147,8 @@ assert_contains '^RETAIN_DAILY=14$' "$ENV_FILE"
 assert_contains '^RETAIN_WEEKLY=8$' "$ENV_FILE"
 assert_contains '^RETAIN_MONTHLY=6$' "$ENV_FILE"
 assert_contains '^RETAIN_LOCAL_DAILY=7$' "$ENV_FILE"
+assert_contains '^APP_ENVIRONMENT=production$' "$ENV_FILE"
+assert_contains '^DEPLOY_BRANCH=main$' "$ENV_FILE"
 # The heredoc is unquoted, so the backups comment names the real directory.
 assert_contains '^# /var/backups/my-app/daily\. ' "$ENV_FILE"
 assert_contains '^POSTGRES_PASSWORD=1{32}$' "$ENV_FILE"

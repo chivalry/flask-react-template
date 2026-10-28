@@ -6,8 +6,9 @@ The site at `$DOMAIN` uses a Let's Encrypt certificate issued by certbot and ser
 host nginx (not by a container), from the site config that `scripts/deploy.sh` renders
 out of `scripts/nginx-ssl.conf.template`. The first certificate comes from
 `scripts/certbot-setup.sh`, which reads `DOMAIN` and `CERTBOT_EMAIL` from the server's
-`.env` (or takes `--email <addr>`). `certbot.timer`, installed with the certbot
-package, attempts renewal twice daily.
+`.env` (or takes `--email <addr>`). A second certificate on the host, staging's
+(`ai/staging.md`), also comes from `certbot-setup.sh`, through the running nginx.
+`certbot.timer`, installed with the certbot package, attempts renewal twice daily.
 
 ## Authenticators — the thing to get right
 
@@ -15,8 +16,12 @@ package, attempts renewal twice daily.
 issuance on a bare server, where `provision.sh` has removed the default site and nginx
 is serving no server block for the `--nginx` authenticator to use.
 
-It is wrong for renewals. Unattended renewals run while nginx holds `:80` permanently,
-so standalone can never rebind and every attempt fails with:
+When nginx is already running with an enabled site, as on a host that serves
+production, `certbot-setup.sh` requests the certificate through it with `--nginx` and
+stops nothing, so issuing staging's certificate leaves production up.
+
+Standalone is wrong for renewals. Unattended renewals run while nginx holds `:80`
+permanently, so standalone can never rebind and every attempt fails with:
 
 ```text
 Could not bind TCP port 80 because it is already in use by another process
@@ -44,8 +49,9 @@ It must read `authenticator = nginx`.
 
 `certonly` fetches files but does not touch the running server, so nginx would keep
 serving the old certificate from memory. `scripts/letsencrypt-deploy-hook.sh` is
-installed by `deploy.sh` to `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh` and
-reloads nginx whenever any renewal succeeds.
+installed by a production deploy to
+`/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh` and reloads nginx whenever any
+renewal succeeds.
 
 ## Monitoring
 
@@ -65,15 +71,17 @@ With no URL set, alerts are written to `/var/log/$APP_NAME/alert.log` and delive
 nowhere — the same silence that let the renewals above fail unnoticed, and not
 sufficient on its own.
 
-`deploy.sh` installs all of this on every deploy. The unit files in `scripts/systemd/`
-carry `__APP_NAME__` and `__REPO_DIR__` placeholders that are rendered at install time,
-so several apps on one host get separate units, and their `OnFailure=` drop-ins merge
-instead of overwriting each other.
+A production deploy installs all of this, the renewal hook included; a staging deploy
+installs none of it, since production's hook and units cover every certificate on the
+host. The unit files in `scripts/systemd/` carry `__APP_NAME__` and `__REPO_DIR__`
+placeholders that are rendered at install time, so several apps on one host get
+separate units, and their `OnFailure=` drop-ins merge instead of overwriting each other.
 
 ## Security headers
 
 The HTTPS server in `scripts/nginx-ssl.conf.template` adds four headers to every
-response, nginx's own error pages included:
+response, nginx's own error pages included, such as the 401 that basic auth sends when
+`STAGING_HTPASSWD` is set:
 
 - `Strict-Transport-Security: max-age=31536000`
 - `X-Content-Type-Options: nosniff`

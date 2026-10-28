@@ -8,6 +8,7 @@ Before making changes in this repository, read and follow these shared instructi
 - `ai/backups.md`
 - `ai/tls.md`
 - `ai/auth.md`
+- `ai/staging.md`
 - `~/.ai/standards/engineering.md`
 - `~/.ai/standards/testing.md`
 - `~/.ai/standards/git.md`

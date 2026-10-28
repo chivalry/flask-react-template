@@ -20,6 +20,14 @@ if [ -z "$APP_NAME" ]; then
   echo "ERROR: APP_NAME is empty in $REPO_DIR/.env." >&2
   exit 1
 fi
+# The rclone remote is host-wide, so a run from another environment's clone would
+# replace production's remote with that clone's settings.
+ENVIRONMENT="$(get APP_ENVIRONMENT)"
+if [ "${ENVIRONMENT:-production}" != production ]; then
+  echo "ERROR: $REPO_DIR/.env deploys $ENVIRONMENT; backups belong to production." >&2
+  echo "       Run install-backup.sh from production's clone." >&2
+  exit 1
+fi
 BUCKET="$(get SPACES_BUCKET)"
 if [ -z "$BUCKET" ]; then
   echo "ERROR: SPACES_BUCKET is empty in $REPO_DIR/.env; nothing to back up to." >&2

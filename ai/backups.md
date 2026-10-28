@@ -8,8 +8,9 @@ Production keeps two kinds of durable state on the server: the Postgres database
 run nightly on a systemd timer, dumps the database and archives the uploads. It keeps
 the newest `RETAIN_LOCAL_DAILY` (7) of each on the server and, once a bucket is
 configured, also pushes them to an S3-compatible bucket (DigitalOcean Spaces by
-default). Every deploy also dumps the database before running migrations, and a
-weekly restore drill proves that the newest backup restores.
+default). Every production deploy also dumps the database before running migrations,
+and a weekly restore drill proves that the newest backup restores. Staging
+(`ai/staging.md`) has none of this, because its data is a copy of production's.
 
 Names below come from the server's `.env`: `$APP_NAME` names the systemd units and the
 `/var/log/$APP_NAME` and `/var/backups/$APP_NAME` directories; `$COMPOSE_PROJECT_NAME`
@@ -88,15 +89,17 @@ Secrets live only in `.env` (gitignored) and `/root/.config/rclone/rclone.conf` 
 ## Setup
 
 1. Local backups need no setup: `scripts/deploy.sh` installs and enables
-   `$APP_NAME-backup.timer` and `$APP_NAME-restore-drill.timer` on every deploy.
+   `$APP_NAME-backup.timer` and `$APP_NAME-restore-drill.timer` on every production
+   deploy.
 2. For off-site copies, create a bucket in the server's region and a dedicated access
    key pair, then fill the `SPACES_*` values in `~/$APP_NAME/.env` on the server.
 3. Run `bash ~/$APP_NAME/scripts/install-backup.sh`. It installs rclone, writes the
    rclone remote from `.env`, verifies the bucket is readable and writable, and renders
-   and enables the same two timers. From the next run, backups also go to the bucket,
-   and the drill restores from it. If that check fails, the remote is already written,
-   so every push to the bucket fails and alerts, and deploys stop at their
-   pre-migration backup, until a re-run passes.
+   and enables the same two timers. It refuses a clone that deploys anything but
+   production, because the rclone remote is host-wide. From the next run, backups also
+   go to the bucket, and the drill restores from it. If that check fails, the remote is
+   already written, so every push to the bucket fails and alerts, and deploys stop at
+   their pre-migration backup, until a re-run passes.
 4. Rotate keys by updating `.env` and re-running `install-backup.sh`.
 
 ## Manual runs and logs
@@ -112,17 +115,18 @@ Secrets live only in `.env` (gitignored) and `/root/.config/rclone/rclone.conf` 
 
 ## Pre-migration dumps
 
-`scripts/deploy.sh` runs `scripts/backup.sh --pre-migration --label <commit>` whenever
+A production deploy runs `scripts/backup.sh --pre-migration --label <commit>` whenever
 the `<COMPOSE_PROJECT_NAME>_postgres_data` volume exists, starting the `db` container
 first if the stack is stopped, before taking the stack down. Only a first deploy, with
-no data volume yet, skips it. `<commit>` is the full commit checked out before the
-deploy's `git pull`, which is the release whose schema the dump holds, unless an
-earlier deploy failed after pulling. The dump is named `db-<timestamp>-<commit>.dump`,
-so the commit in its name identifies the code that matches its schema. It is kept
-locally in `/var/backups/$APP_NAME/pre-migration/` (newest three) and, once the rclone
-remote exists, pushed to `premigration/` in the bucket. A failed pre-migration backup
-aborts the deploy. To undo a bad migration, restore the newest local dump with the
-database step of the disaster-recovery procedure below.
+no data volume yet, skips it. A staging deploy takes none. `<commit>` is the full
+commit checked out before the deploy's `git pull`, which is the release whose schema
+the dump holds, unless an earlier deploy failed after pulling. The dump is named
+`db-<timestamp>-<commit>.dump`, so the commit in its name identifies the code that
+matches its schema. It is kept locally in `/var/backups/$APP_NAME/pre-migration/`
+(newest three) and, once the rclone remote exists, pushed to `premigration/` in the
+bucket. A failed pre-migration backup aborts the deploy. To undo a bad migration,
+restore the newest local dump with the database step of the disaster-recovery procedure
+below.
 
 ## Failure alerting
 
@@ -182,11 +186,11 @@ Things to know:
 ## Orphaned-volume cleanup
 
 Only ever remove volumes confirmed empty and unused. NEVER touch
-`<COMPOSE_PROJECT_NAME>_*`. Candidates are anonymous 64-hex volumes and volumes left
-behind by an abandoned project name. The restore drill removes its own anonymous data
-volume (`docker rm -f -v`), so a finished drill leaves none behind. A
-`$APP_NAME-restore-drill` container left by a drill killed outright is removed, with
-its volume, by the next drill. For each candidate:
+`<COMPOSE_PROJECT_NAME>_*`, production's or staging's. Candidates are anonymous 64-hex
+volumes and volumes left behind by an abandoned project name. The restore drill removes
+its own anonymous data volume (`docker rm -f -v`), so a finished drill leaves none
+behind. A `$APP_NAME-restore-drill` container left by a drill killed outright is
+removed, with its volume, by the next drill. For each candidate:
 
 1. Confirm no container uses it — `docker ps -a --filter volume=<vol>` is empty.
 2. Confirm it holds no cluster:

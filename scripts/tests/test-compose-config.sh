@@ -5,8 +5,9 @@
 # backend, that neither stack overrides the image's user, and what the production stack
 # must keep: loopback-only ports and no database port; a backend that runs
 # docker/entrypoint.sh under FLASK_ENV=production, where it starts gunicorn, with
-# GUNICORN_WORKERS and secure session cookies; and the nginx frontend. It needs the
-# docker CLI with Compose, and jq, but no daemon; without them it exits 77, which
+# GUNICORN_WORKERS, secure session cookies, and the .env's APP_ENVIRONMENT passed
+# through, blank when unset; and the nginx frontend. It needs the docker CLI with
+# Compose, and jq, but no daemon; without them it exits 77, which
 # scripts/tests/run-all.sh counts as a skip outside CI. It runs under macOS's bash 3.2
 # and on Linux.
 set -euo pipefail
@@ -21,7 +22,8 @@ trap 'rm -rf "$TEST_DIR"' EXIT
 # Placeholders for the variables the production override requires. An empty env file
 # keeps a developer's .env out of the renders, and the shell must not supply the files
 # or the values the checks read.
-unset COMPOSE_FILE GUNICORN_WORKERS SESSION_COOKIE_SECURE SESSION_COOKIE_SAMESITE
+unset COMPOSE_FILE GUNICORN_WORKERS SESSION_COOKIE_SECURE SESSION_COOKIE_SAMESITE \
+  APP_ENVIRONMENT
 : > "$TEST_DIR/empty.env"
 export POSTGRES_USER=app POSTGRES_PASSWORD=app POSTGRES_DB=app SECRET_KEY=placeholder \
   DATABASE_URL=postgresql://app:app@db:5432/app CORS_ALLOWED_ORIGINS=http://localhost \
@@ -37,6 +39,10 @@ render -f docker-compose.yml -f docker/docker-compose.prod.yml > "$TEST_DIR/prod
   export GUNICORN_WORKERS=3
   render -f docker-compose.yml -f docker/docker-compose.prod.yml
 ) > "$TEST_DIR/prod-workers.json"
+(
+  export APP_ENVIRONMENT=staging
+  render -f docker-compose.yml -f docker/docker-compose.prod.yml
+) > "$TEST_DIR/prod-staging.json"
 
 # check STACK FILTER EXPECTATION -> fail unless jq's FILTER holds for STACK's render.
 check() {
@@ -96,6 +102,10 @@ check prod '.services.backend.environment.SESSION_COOKIE_SECURE == "true"' \
   'secure session cookies by default'
 check prod '.services.backend.environment.SESSION_COOKIE_SAMESITE == "Strict"' \
   'strict SameSite session cookies by default'
+check prod '.services.backend.environment.APP_ENVIRONMENT == ""' \
+  'a blank APP_ENVIRONMENT, which the backend reads as production'
+check prod-staging '.services.backend.environment.APP_ENVIRONMENT == "staging"' \
+  'APP_ENVIRONMENT passed through to the backend'
 check prod '.services.frontend.build.dockerfile == "docker/nginx.Dockerfile"' \
   'the nginx image as its frontend'
 

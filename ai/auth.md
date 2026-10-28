@@ -112,10 +112,13 @@ UPDATE users SET is_active = true WHERE email = '<email>';
 - `WEBAUTHN_RP_NAME` is the site name passkey prompts show. It falls back to
   `APP_NAME`, which is a slug, and then to `Flask React Template`, so set it to the
   product's display name.
+- `APP_ENVIRONMENT` (`ai/staging.md`) gives every environment but production the
+  session cookie `<environment>_session`, so a sign-in on staging never replaces
+  production's.
 
-A server provisioned before these settings existed lacks both lines, and its next
-deploy stops with `PUBLIC_BASE_URL is empty`. Add them to `~/$APP_NAME/.env`, then
-deploy again:
+A server provisioned before `PUBLIC_BASE_URL` and `WEBAUTHN_RP_NAME` existed lacks both
+lines, and its next deploy stops with `PUBLIC_BASE_URL is empty`. Add them to
+`~/$APP_NAME/.env`, then deploy again:
 
 ```text
 PUBLIC_BASE_URL=https://<DOMAIN>

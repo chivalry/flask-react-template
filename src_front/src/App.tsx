@@ -1,10 +1,11 @@
-/** @file Route table for the application. */
+/** @file Route table for the application, and the environment badge. */
 
 import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import AdminRoute from './components/AdminRoute'
 import AppShell from './components/layout/AppShell'
+import EnvironmentBadge from './components/layout/EnvironmentBadge'
 import ProtectedRoute from './components/ProtectedRoute'
 import RouteErrorBoundary from './components/RouteErrorBoundary'
 import { useSessionQueryCache } from './hooks/useSessionQueryCache'
@@ -29,8 +30,10 @@ const Register = lazy(() => import('./pages/Register'))
  * {@link RouteErrorBoundary} around the auth pages and another inside the shell
  * replace a page that throws, or whose chunk fails to load, with a fallback; inside
  * the shell the app bar stays on screen, and navigating to another page clears it.
+ * Outside production, {@link EnvironmentBadge} marks every page, the sign-in page
+ * included.
  *
- * @returns The route table.
+ * @returns The route table and the environment badge.
  */
 export default function App() {
     useSessionQueryCache()
@@ -41,24 +44,27 @@ export default function App() {
     }, [fetchMe])
 
     return (
-        <Suspense fallback={null}>
-            <Routes>
-                <Route element={<RouteErrorBoundary />}>
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/register" element={<Register />} />
-                </Route>
-                <Route element={<ProtectedRoute />}>
-                    <Route element={<AppShell />}>
-                        <Route element={<RouteErrorBoundary />}>
-                            <Route index element={<Home />} />
-                            <Route element={<AdminRoute />}>
-                                <Route path="/admin/*" element={<AdminPage />} />
+        <>
+            <EnvironmentBadge />
+            <Suspense fallback={null}>
+                <Routes>
+                    <Route element={<RouteErrorBoundary />}>
+                        <Route path="/login" element={<Login />} />
+                        <Route path="/register" element={<Register />} />
+                    </Route>
+                    <Route element={<ProtectedRoute />}>
+                        <Route element={<AppShell />}>
+                            <Route element={<RouteErrorBoundary />}>
+                                <Route index element={<Home />} />
+                                <Route element={<AdminRoute />}>
+                                    <Route path="/admin/*" element={<AdminPage />} />
+                                </Route>
                             </Route>
                         </Route>
                     </Route>
-                </Route>
-                <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-        </Suspense>
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+            </Suspense>
+        </>
     )
 }

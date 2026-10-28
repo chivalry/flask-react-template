@@ -26,15 +26,17 @@ repo=$(basename "$(pwd)")
 # A filesystem- and Compose-safe slug for the directory and project name.
 slug=$(printf '%s' "$branch" | tr '/A-Z' '-a-z')
 
-# Fetch so new branches fork from current origin/main and a freshly pushed
+# Fetch so new branches fork from the current integration branch, and a freshly pushed
 # remote branch is detected rather than recreated locally and divergent.
 git fetch origin
 
-# Create the worktree: track an existing origin branch, else branch off main.
-# A bare clone made without a fetch refspec has no origin/* refs; fall back to
-# the local main branch in that case.
+# Create the worktree: track an existing origin branch, else branch off origin/staging,
+# the default branch, where it exists, else origin/main. A bare clone made without a
+# fetch refspec has no origin/* refs; fall back to the local main branch in that case.
 if git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
   git worktree add "$slug" "$branch"
+elif git show-ref --verify --quiet refs/remotes/origin/staging; then
+  git worktree add "$slug" -b "$branch" origin/staging
 elif git show-ref --verify --quiet refs/remotes/origin/main; then
   git worktree add "$slug" -b "$branch" origin/main
 else

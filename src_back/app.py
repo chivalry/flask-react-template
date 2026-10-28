@@ -91,6 +91,7 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
     app = Flask(__name__, static_folder='../dist', static_url_path='/')
 
     _configure_application(app)
+    _configure_environment(app)
     if config_overrides:
         app.config.update(config_overrides)
     _guard_secret_key(app)
@@ -142,6 +143,23 @@ def _configure_application(app: Flask) -> None:
         or os.environ.get('APP_NAME')
         or 'Flask React Template'
     )
+
+
+def _configure_environment(app: Flask) -> None:
+    """Name the deployment, and give any but production its own session cookie.
+
+    ``APP_ENVIRONMENT`` is ``production`` when unset or blank, and ``/api/health``
+    reports it so the frontend can badge every page outside production. Browsers keep
+    cookies per host name, not per port, so another environment reached under
+    production's host name would otherwise overwrite production's session cookie.
+
+    Args:
+        app: The application being configured.
+    """
+    environment = os.environ.get('APP_ENVIRONMENT') or 'production'
+    app.config['APP_ENVIRONMENT'] = environment
+    if environment != 'production':
+        app.config['SESSION_COOKIE_NAME'] = f'{environment}_session'
 
 
 def _guard_secret_key(app: Flask) -> None:

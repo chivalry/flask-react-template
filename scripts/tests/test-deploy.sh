@@ -2,9 +2,9 @@
 # Exercise scripts/deploy.sh: the real script runs in a disposable copy of the
 # repository, with its /etc paths redirected into the test directory, stub docker, git,
 # curl, nginx, systemctl, and sleep commands, and a stand-in scripts/backup.sh. It
-# checks the commands of a redeploy and of a first deploy, the units and the nginx site
-# they install, and each way the script stops. It runs under macOS's bash 3.2 and on
-# Linux in CI, so it avoids bash 4 features.
+# checks the commands of a redeploy, of a first deploy, and of a staging deploy, the
+# units and the nginx site they install, and each way the script stops. It runs under
+# macOS's bash 3.2 and on Linux in CI, so it avoids bash 4 features.
 set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_DIR=$(mktemp -d)
@@ -62,9 +62,10 @@ BACKUP
 # logged too, and reads its conditions from markers in $TEST_DIR/flags. docker finds a
 # volume while volume-<name> exists and fails the uploads chown while chown-fails
 # exists, and accepts the Compose calls deploy.sh makes, but the database does not
-# answer pg_isready while db-down exists; git reports $COMMIT as HEAD and pulls; curl
-# cannot reach the backend while backend-down exists; nginx rejects the configuration
-# while nginx-invalid exists; systemctl and sleep only log.
+# answer pg_isready while db-down exists; git reports $COMMIT as HEAD, pulls, and names
+# the checked-out branch from the branch flag (main without one) unless detached exists;
+# curl cannot reach the backend while backend-down exists; nginx rejects the
+# configuration while nginx-invalid exists; systemctl and sleep only log.
 cat > "$TEST_DIR/bin/mock-command" <<'MOCK'
 #!/usr/bin/env bash
 set -eu
@@ -85,6 +86,10 @@ case "$name" in
     ;;
   git)
     case "$*" in
+      'symbolic-ref --quiet --short HEAD')
+        [ ! -f "$flags/detached" ] || exit 1
+        if [ -f "$flags/branch" ]; then cat "$flags/branch"; else echo main; fi
+        ;;
       'rev-parse HEAD') echo "$COMMIT" ;;
       pull) ;;
       *) echo "Unexpected git call: $*" >&2; exit 1 ;;
@@ -119,6 +124,20 @@ assert_line "$REPO_DIR/scripts/deploy.sh" "BACKEND_UID=$IMAGE_UID"
 CHOWN="docker run --rm -v $UPLOADS_VOLUME:/uploads alpine"
 CHOWN+=" chown -R $IMAGE_UID:$IMAGE_UID /uploads"
 
+# .env.staging.example is a whole staging .env: it deploys staging from the staging
+# branch, behind a password, and every key it sets is one .env.example documents. The
+# APP_NAME check keeps the loop from passing on an empty list.
+STAGING_EXAMPLE="$REPO_DIR/.env.staging.example"
+assert_contains '^APP_ENVIRONMENT=staging$' "$STAGING_EXAMPLE"
+assert_contains '^DEPLOY_BRANCH=staging$' "$STAGING_EXAMPLE"
+assert_contains '^STAGING_HTPASSWD=/' "$STAGING_EXAMPLE"
+sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' "$STAGING_EXAMPLE" > "$TEST_DIR/staging-keys"
+assert_contains '^APP_NAME$' "$TEST_DIR/staging-keys"
+while IFS= read -r key; do
+  grep -Eq "^$key=" "$REPO_DIR/.env.example" ||
+    { echo ".env.staging.example sets $key, which .env.example lacks." >&2; exit 1; }
+done < "$TEST_DIR/staging-keys"
+
 # start_test_case [LINE...] -> a fresh start: the certificate, the stock nginx site, an
 # empty systemd directory, no flags, an empty command log, and a .env holding what
 # deploy.sh requires plus any given lines, which win because deploy.sh reads the last
@@ -139,24 +158,27 @@ add_data_volumes() {
   touch "$FLAGS/volume-$PG_VOLUME" "$FLAGS/volume-$UPLOADS_VOLUME"
 }
 
-# run_deploy_script -> run the copy of deploy.sh and leave its output in $OUTPUT. The
-# strict umask lets a file mode the script does not set itself show in the checks.
+# run_deploy_script [ARG...] -> run the copy of deploy.sh with these arguments and leave
+# its output in $OUTPUT. The strict umask lets a file mode the script does not set itself
+# show in the checks.
 run_deploy_script() {
-  (umask 077; bash "$TEST_DIR/repo/scripts/deploy.sh") > "$OUTPUT" 2>&1
+  (umask 077; bash "$TEST_DIR/repo/scripts/deploy.sh" "$@") > "$OUTPUT" 2>&1
 }
 
-# run_deploy -> the run succeeds; show its output if it fails.
+# run_deploy [ARG...] -> the run succeeds; show its output if it fails.
 run_deploy() {
-  run_deploy_script ||
+  run_deploy_script "$@" ||
     { echo 'deploy.sh failed. Its output:' >&2; cat "$OUTPUT" >&2; exit 1; }
 }
 
-# expect_failure DESCRIPTION -> the run exits 1, as every refusal of deploy.sh does.
+# expect_failure DESCRIPTION [ARG...] -> the run exits 1, as every refusal of deploy.sh
+# does.
 expect_failure() {
-  local status=0
-  run_deploy_script || status=$?
+  local description=$1 status=0
+  shift
+  run_deploy_script "$@" || status=$?
   [ "$status" -eq 1 ] || {
-    echo "Expected $1; deploy.sh exited $status. Its output:" >&2
+    echo "Expected $description; deploy.sh exited $status. Its output:" >&2
     cat "$OUTPUT" >&2
     exit 1
   }
@@ -221,6 +243,7 @@ expect_calls \
   "docker volume inspect $PG_VOLUME" \
   "docker volume inspect $PG_VOLUME" \
   "docker volume inspect $UPLOADS_VOLUME" \
+  'git symbolic-ref --quiet --short HEAD' \
   'git rev-parse HEAD' \
   'git pull' \
   "$COMPOSE up -d db" \
@@ -255,6 +278,9 @@ assert_contains "/var/log/$APP/restore-drill\.log" \
   "$SYSTEMD_DIR/$APP-alert-restore-drill.service"
 assert_contains 'example\.com' "$NGINX_DIR/sites-available/$APP"
 refute_contains '__[A-Z_]+__' "$NGINX_DIR/sites-available/$APP"
+# A production site carries no basic auth; the pattern skips comment lines, which
+# deploy.sh renders too.
+refute_contains '^[^#]*auth_basic' "$NGINX_DIR/sites-available/$APP"
 # The rate-limit zone is named for the app, so apps sharing the host count apart.
 assert_contains "zone=$APP-auth:10m" "$NGINX_DIR/sites-available/$APP"
 [ "$(readlink "$NGINX_DIR/sites-enabled/$APP")" = "$NGINX_DIR/sites-available/$APP" ] ||
@@ -271,6 +297,7 @@ run_deploy
 expect_calls \
   "docker volume inspect $PG_VOLUME" \
   "docker volume inspect $UPLOADS_VOLUME" \
+  'git symbolic-ref --quiet --short HEAD' \
   'git rev-parse HEAD' \
   'git pull' \
   "$COMPOSE down" \
@@ -378,5 +405,93 @@ start_test_case COMPOSE_PROJECT_NAME=
 expect_failure 'an empty COMPOSE_PROJECT_NAME to stop the deploy'
 assert_contains 'ERROR: COMPOSE_PROJECT_NAME is not set' "$OUTPUT"
 assert_no_commands
+
+# A deploy of any environment but production, from a clone on its branch with a password
+# file, takes no pre-migration backup and changes no host-wide state but its own nginx
+# site: no timer, unit, or certbot drop-in, and no renewal hook. Its site names the app
+# as the basic-auth realm and the password file. qa stands in for any environment but
+# staging and production.
+for environment in staging qa; do
+  start_test_case "APP_ENVIRONMENT=$environment" "DEPLOY_BRANCH=$environment" \
+    "STAGING_HTPASSWD=$TEST_DIR/staging.htpasswd"
+  touch "$TEST_DIR/staging.htpasswd"
+  echo "$environment" > "$FLAGS/branch"
+  add_data_volumes
+  run_deploy --environment "$environment"
+  expect_calls \
+    "docker volume inspect $PG_VOLUME" \
+    "docker volume inspect $PG_VOLUME" \
+    "docker volume inspect $UPLOADS_VOLUME" \
+    'git symbolic-ref --quiet --short HEAD' \
+    'git rev-parse HEAD' \
+    'git pull' \
+    "$CHOWN" \
+    "$COMPOSE down" \
+    "$COMPOSE up -d --build --remove-orphans" \
+    'curl -fsS http://127.0.0.1:5000/api/health' \
+    'systemctl enable nginx' \
+    'nginx -t' \
+    'systemctl reload-or-restart nginx'
+  [ -z "$(find "$SYSTEMD_DIR" -type f)" ] ||
+    { echo "A $environment deploy installed systemd files." >&2; exit 1; }
+  assert_line "$NGINX_DIR/sites-available/$APP" \
+    "    auth_basic \"$APP\"; auth_basic_user_file $TEST_DIR/staging.htpasswd;"
+  assert_contains "$environment deploys take no pre-migration backup" "$OUTPUT"
+  [ ! -e "$LETSENCRYPT_DIR/renewal-hooks/deploy/reload-nginx.sh" ] ||
+    { echo "A $environment deploy installed the renewal hook." >&2; exit 1; }
+done
+
+# The environment asked for must be the one the clone's .env deploys, whichever way it
+# differs, and the refusal comes before any command runs.
+start_test_case
+expect_failure 'a production .env to refuse --environment staging' --environment staging
+assert_contains 'asked to deploy staging, but .* deploys' "$OUTPUT"
+assert_no_commands
+start_test_case APP_ENVIRONMENT=staging DEPLOY_BRANCH=staging
+expect_failure 'a staging .env to refuse a deploy that names no environment'
+assert_contains 'asked to deploy production' "$OUTPUT"
+assert_no_commands
+
+# The clone must be on the branch its .env deploys, main when DEPLOY_BRANCH is blank. A
+# production clone on staging, or on a detached HEAD, stops after the branch check and
+# before the pull or any change to the stack.
+start_test_case
+add_data_volumes
+echo staging > "$FLAGS/branch"
+expect_failure 'a production clone on the staging branch to stop the deploy'
+assert_contains 'is on staging, but its \.env deploys main' "$OUTPUT"
+assert_last_command 'git symbolic-ref --quiet --short HEAD'
+refute_contains '^git pull' "$COMMANDS"
+refute_contains '^docker compose' "$COMMANDS"
+start_test_case
+add_data_volumes
+touch "$FLAGS/detached"
+expect_failure 'a production clone on a detached HEAD to stop the deploy'
+assert_contains 'is on a detached HEAD' "$OUTPUT"
+assert_last_command 'git symbolic-ref --quiet --short HEAD'
+refute_contains '^git pull' "$COMMANDS"
+refute_contains '^docker compose' "$COMMANDS"
+# The stub answers main when no branch flag exists. --environment=staging, the option's
+# other form, gets past the environment guard, so the branch guard is the one that fires.
+start_test_case APP_ENVIRONMENT=staging DEPLOY_BRANCH=staging
+add_data_volumes
+expect_failure 'a staging clone on main to stop the deploy' --environment=staging
+assert_contains 'is on main, but its \.env deploys staging' "$OUTPUT"
+
+# A password file that does not exist stops the deploy before any command runs, so the
+# site is never installed unprotected.
+start_test_case "STAGING_HTPASSWD=$TEST_DIR/missing.htpasswd"
+expect_failure 'a missing password file to stop the deploy'
+assert_contains 'STAGING_HTPASSWD names .* which does not exist' "$OUTPUT"
+assert_no_commands
+
+# An unknown argument, a bare --environment, and an empty --environment= print the usage
+# line before any command runs.
+start_test_case
+for bad_argument in --bogus --environment --environment=; do
+  expect_failure "the argument $bad_argument to print the usage" "$bad_argument"
+  assert_contains 'usage: bash scripts/deploy\.sh' "$OUTPUT"
+  assert_no_commands
+done
 
 echo 'Deploy regression checks passed.'

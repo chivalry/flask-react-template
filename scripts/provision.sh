@@ -2,7 +2,8 @@
 # Provision a fresh Ubuntu server for this app. Run as root, immediately after the first
 # SSH login, from inside a clone of this repository:
 #
-#   git clone <repo-url> ~/<app-name> && cd ~/<app-name>
+#   git clone --branch main <repo-url> ~/<app-name> && cd ~/<app-name>
+#   # staging is the default branch, so production names main
 #   bash scripts/provision.sh <domain>
 #
 # <domain> is the public hostname the app will be served at (DNS may still be
@@ -81,6 +82,11 @@ else
 APP_NAME=$APP_NAME
 DOMAIN=$DOMAIN
 COMPOSE_PROJECT_NAME=$APP_NAME
+
+# --- Environment and branch (scripts/deploy.sh) ---------------------------------
+# Production serves the main branch; deploy.sh refuses a clone on any other branch.
+APP_ENVIRONMENT=production
+DEPLOY_BRANCH=main
 
 # --- PostgreSQL (db service) and the URL Flask uses to reach it -----------------
 POSTGRES_USER=app
