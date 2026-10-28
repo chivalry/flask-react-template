@@ -64,7 +64,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   query, so an unknown id fails with a 422. A schema that trims strings does it in a
   `@pre_load` hook, not `@post_load`: the `Length` validators generated from the
   columns run on the raw value, so a post-load trim still rejects a padded value of
-  the maximum length.
+  the maximum length. Every `DateTime` column serializes through `UTCDateTime`, in
+  UTC with an explicit offset: SQLite returns datetimes without one, and a browser
+  reads such a string as local time. A datetime field declared by hand uses
+  `UTCDateTime` too.
 - Auth is a Flask-Login session cookie. Every sign-in ends in `complete_login(user)`
   from `services/auth.py`, the only `login_user` call, so a new way to sign in (an
   OAuth callback, a passkey check) calls it too. It marks the session permanent, so

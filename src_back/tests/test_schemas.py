@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 import pytest
@@ -6,7 +7,7 @@ from marshmallow import Schema, ValidationError
 
 from src_back.models import Role, User
 from src_back.models.user import normalize_email
-from src_back.schemas.base import BaseSchema, validate_ids_exist
+from src_back.schemas.base import BaseSchema, UTCDateTime, validate_ids_exist
 from src_back.schemas.user import (
     login_schema,
     registration_schema,
@@ -127,6 +128,22 @@ def test_base_schema_defaults_nullable_fields_to_none(app: Flask) -> None:
 def test_base_schema_marks_audit_columns_dump_only(app: Flask) -> None:
     with pytest.raises(ValidationError):
         WidgetNoteSchema().load({'widget_id': 1, 'uuid': 'client-chosen'})
+
+
+def test_base_schema_serializes_datetime_columns_with_utc_datetime(app: Flask) -> None:
+    fields = WidgetNoteSchema().fields
+    assert isinstance(fields['created_at'], UTCDateTime)
+    assert isinstance(fields['updated_at'], UTCDateTime)
+
+
+def test_utc_datetime_gives_every_value_an_explicit_utc_offset() -> None:
+    field = UTCDateTime()
+    # SQLite returns this without its offset; PostgreSQL may return another zone's.
+    naive = datetime(2026, 10, 14, 16, 5)
+    pacific = datetime(2026, 10, 14, 9, 5, tzinfo=timezone(timedelta(hours=-7)))
+    assert field.serialize('at', {'at': naive}) == '2026-10-14T16:05:00+00:00'
+    assert field.serialize('at', {'at': pacific}) == '2026-10-14T16:05:00+00:00'
+    assert field.serialize('at', {'at': None}) is None
 
 
 def test_user_repr_names_the_email(app: Flask) -> None:

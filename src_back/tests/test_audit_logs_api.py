@@ -86,6 +86,12 @@ def test_record_history_is_newest_first_and_only_that_record(
         'admin@test.com',
         None,
     ]
+    # In UTC with an explicit offset, on SQLite too, which stores datetimes without one;
+    # a browser would read an offset-less string as local time.
+    assert [item['changed_at'] for item in data['items']] == [
+        '2026-10-14T12:00:00+00:00',
+        '2026-10-14T10:00:00+00:00',
+    ]
 
 
 def test_history_breaks_ties_by_id(auth_client: FlaskClient) -> None:
