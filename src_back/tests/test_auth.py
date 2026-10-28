@@ -4,12 +4,14 @@ import flask_login
 import pytest
 from flask import Flask, g, session
 from flask.testing import FlaskClient
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import select
 from werkzeug.security import check_password_hash
 
 from src_back import auth
 from src_back.api import auth as auth_api
 from src_back.app import SESSION_LIFETIME_DAYS
-from src_back.models import Role, User
+from src_back.models import AuditAction, AuditLog, Role, User
 from src_back.models import user as user_model
 from src_back.services import auth as auth_service
 from src_back.services.auth import (
@@ -58,6 +60,27 @@ def test_register_creates_an_active_user(client: FlaskClient) -> None:
     assert account is not None
     assert account.role is Role.user
     assert account.is_active is True
+
+
+def test_register_logs_the_account_with_no_actor(
+    client: FlaskClient, db: SQLAlchemy
+) -> None:
+    r = client.post(
+        '/api/v1/auth/register',
+        json={'email': 'new@example.com', 'password': 'secure123'},
+    )
+    assert r.status_code == 201
+    entry = db.session.scalars(select(AuditLog)).one()
+    assert entry.table_name == 'users'
+    assert entry.record_id == r.get_json()['id']
+    assert entry.record_label == 'new@example.com'
+    assert entry.action is AuditAction.created
+    assert entry.changes == {
+        'email': 'new@example.com',
+        'role': 'user',
+        'is_active': True,
+    }
+    assert entry.changed_by_id is None
 
 
 def test_register_cookie_expires_one_session_lifetime_out(client: FlaskClient) -> None:

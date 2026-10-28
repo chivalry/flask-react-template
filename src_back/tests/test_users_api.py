@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
@@ -5,7 +7,10 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import select
 from werkzeug.test import TestResponse
 
-from src_back.models import Role, User
+from src_back.extensions import db as _db
+from src_back.models import AuditAction, AuditLog, Role, User
+from src_back.services.audit_log import audited_tables
+from src_back.services.auth import USER_AUDIT_TRAIL
 from src_back.tests.helpers import persist
 
 USERS_URL = '/api/v1/users'
@@ -318,3 +323,81 @@ def test_update_unknown_field_is_unprocessable(
     r = admin_client.put(f'{USERS_URL}/{user.id}', json={'nickname': 'x'})
     assert r.status_code == 422
     assert r.get_json() == {'error': 'Invalid request'}
+
+
+# -- audit log ----------------------------------------------------------------
+
+
+def _history(user_id: int) -> list[AuditLog]:
+    stmt = (
+        select(AuditLog)
+        .where(AuditLog.table_name == 'users', AuditLog.record_id == user_id)
+        .order_by(AuditLog.id)
+    )
+    return list(_db.session.scalars(stmt).all())
+
+
+def test_account_history_is_admin_only_in_the_registry() -> None:
+    assert audited_tables()[USER_AUDIT_TRAIL.table_name] is True
+
+
+def test_create_logs_the_account_with_the_admin_as_actor(
+    admin_client: FlaskClient, admin_user: User
+) -> None:
+    r = admin_client.post(
+        USERS_URL,
+        json={'email': 'new@test.com', 'password': 'secure123', 'role': 'admin'},
+    )
+    assert r.status_code == 201
+    (entry,) = _history(r.get_json()['id'])
+    assert entry.action is AuditAction.created
+    assert entry.changes == {'email': 'new@test.com', 'role': 'admin', 'is_active': True}
+    assert entry.changed_by_id == admin_user.id
+    assert entry.record_label == 'new@test.com'
+
+
+def test_update_logs_only_what_changed(admin_client: FlaskClient, user: User) -> None:
+    r = admin_client.put(
+        f'{USERS_URL}/{user.id}', json={'email': 'user@test.com', 'role': 'admin'}
+    )
+    assert r.status_code == 200
+    (entry,) = _history(user.id)
+    assert entry.action is AuditAction.updated
+    assert entry.changes == {'role': {'old': 'user', 'new': 'admin'}}
+
+
+def test_update_that_changes_nothing_logs_nothing(
+    admin_client: FlaskClient, user: User
+) -> None:
+    # The model stores the email normalized, so this is the address it already has.
+    r = admin_client.put(f'{USERS_URL}/{user.id}', json={'email': 'USER@test.com'})
+    assert r.status_code == 200
+    assert _history(user.id) == []
+
+
+def test_password_change_is_logged_masked(admin_client: FlaskClient, user: User) -> None:
+    r = admin_client.put(f'{USERS_URL}/{user.id}', json={'password': 'newsecret1'})
+    assert r.status_code == 200
+    (entry,) = _history(user.id)
+    assert entry.changes == {'password': {'old': '********', 'new': '********'}}
+    recorded = json.dumps(entry.changes)
+    assert 'newsecret1' not in recorded
+    assert user.password_hash is not None
+    assert user.password_hash not in recorded
+
+
+def test_first_password_is_logged_without_an_old_value(
+    admin_client: FlaskClient, passwordless_user: User
+) -> None:
+    r = admin_client.put(
+        f'{USERS_URL}/{passwordless_user.id}', json={'password': 'newsecret1'}
+    )
+    assert r.status_code == 200
+    (entry,) = _history(passwordless_user.id)
+    assert entry.changes == {'password': {'old': None, 'new': '********'}}
+
+
+def test_refused_update_logs_nothing(admin_client: FlaskClient, admin_user: User) -> None:
+    r = admin_client.put(f'{USERS_URL}/{admin_user.id}', json={'role': 'user'})
+    assert r.status_code == 400
+    assert _history(admin_user.id) == []

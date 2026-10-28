@@ -9,6 +9,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from src_back.extensions import db
 from src_back.models import Role, User
 from src_back.models.user import normalize_email
+from src_back.services.audit_log import AuditTrail
 from src_back.services.errors import DuplicateRecordError, InactiveAccountError
 
 # Checked in place of a stored hash when there is none, so an unknown email and an
@@ -16,6 +17,14 @@ from src_back.services.errors import DuplicateRecordError, InactiveAccountError
 # is hashed the way User.set_password hashes, from a random plaintext nobody keeps, so
 # checking it can never let anyone in.
 _DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(32))
+
+# Every place that creates or changes an account audits it through this trail:
+# registration here, the admin's Users screen (services/users.py), and the seed. Only
+# admins may read account histories, which carry every account's email and role. No
+# password or hash is recorded; services/users.py logs a change as MASKED_VALUE.
+USER_AUDIT_TRAIL = AuditTrail(
+    User, ('email', 'role', 'is_active'), label_field='email', admin_only=True
+)
 
 
 def find_user_by_email(email: str) -> User | None:
@@ -37,6 +46,9 @@ def register_user(email: str, password: str) -> User:
     normalized. New accounts always receive the unprivileged ``user`` role; an admin
     promotes them on the Users screen.
 
+    Its audit entry names the signed-in caller, if any; an ordinary registration has
+    none.
+
     Args:
         email: The address to register, in any case. Must not already be in use.
         password: The plaintext password, hashed before it is stored.
@@ -52,6 +64,7 @@ def register_user(email: str, password: str) -> User:
     user = User(email=email, role=Role.user)
     user.set_password(password)
     db.session.add(user)
+    USER_AUDIT_TRAIL.log_created(user)
     db.session.commit()
     return user
 

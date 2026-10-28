@@ -2,7 +2,7 @@ import pytest
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
-from src_back.models import Role, User
+from src_back.models import AuditAction, AuditLog, Role, User
 from src_back.seed import seed
 from src_back.services.auth import authenticate_user
 from src_back.services.users import update_user
@@ -88,6 +88,11 @@ def test_seed_creates_a_normalized_active_admin(
     assert admin.check_password(ADMIN_PASSWORD)
     assert not admin.check_password('wrong password')
     assert f'Seeded admin {ADMIN_EMAIL}.' in capsys.readouterr().out
+    entry = db.session.query(AuditLog).one()
+    assert entry.table_name == 'users'
+    assert entry.record_id == admin.id
+    assert entry.action is AuditAction.created
+    assert entry.changed_by_id is None
 
 
 def test_seed_leaves_an_existing_account_in_another_case_untouched(
@@ -125,6 +130,7 @@ def test_seed_twice_changes_nothing(
     capsys.readouterr()
     seed(app)
     assert _account_rows(db) == first_run
+    assert db.session.query(AuditLog).count() == 1
     assert ADMIN_EXISTS_LINE in capsys.readouterr().out
 
 

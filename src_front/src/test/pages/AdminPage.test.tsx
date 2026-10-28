@@ -1,4 +1,4 @@
-/** @file The admin page lands on its first section and selects that section's tab. */
+/** @file The admin page lands on its first section and selects the open section's tab. */
 
 import { screen } from '@testing-library/react'
 import { useLocation } from 'react-router-dom'
@@ -9,6 +9,9 @@ import { renderWithProviders } from '../utils/renderWithProviders'
 
 vi.mock('../../components/admin/UsersAdmin', () => ({
     default: () => <div>Users section</div>,
+}))
+vi.mock('../../components/admin/AdminAuditLogTab', () => ({
+    default: () => <div>Audit section</div>,
 }))
 
 /** Show the router's current path, so a test can see where a redirect landed. */
@@ -39,4 +42,14 @@ describe('AdminPage', () => {
             expect(tab).toHaveAttribute('aria-selected', 'true')
         },
     )
+
+    it('shows the Audit section at /admin/audit and selects its tab', async () => {
+        renderAdminPageAt('/admin/audit')
+
+        expect(await screen.findByText('Audit section')).toBeInTheDocument()
+        expect(screen.queryByText('Users section')).not.toBeInTheDocument()
+        const tab = screen.getByRole('tab', { name: 'Audit' })
+        expect(tab).toHaveAttribute('href', '/admin/audit')
+        expect(tab).toHaveAttribute('aria-selected', 'true')
+    })
 })

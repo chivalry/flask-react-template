@@ -1,14 +1,18 @@
 """Accounts and their roles."""
 
 import enum
+from typing import TYPE_CHECKING
 
 from flask_login import UserMixin
 from sqlalchemy import Boolean, Enum, String, true
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from src_back.extensions import Base
 from src_back.models.base import BaseMixin
+
+if TYPE_CHECKING:
+    from src_back.models.audit_log import AuditLog
 
 
 class Role(enum.StrEnum):
@@ -63,6 +67,10 @@ class User(UserMixin, BaseMixin, Base):
     is_active: Mapped[bool] = (  # pyright: ignore[reportIncompatibleMethodOverride]
         mapped_column(Boolean, default=True, server_default=true())
     )
+    # No cascade: the entries outlive the account. Deleting the account sets their
+    # changed_by_id to NULL here, as ON DELETE SET NULL does in PostgreSQL, because
+    # the SQLite test database does not enforce foreign keys.
+    audit_entries: Mapped[list['AuditLog']] = relationship(back_populates='changed_by')
 
     @validates('email')
     def _store_email_normalized(self, _key: str, email: str) -> str:

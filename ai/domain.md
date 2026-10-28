@@ -16,6 +16,12 @@ to put new behavior in the right service.
   accounts with any role and change an account's email, password, role, and active
   state. Nothing deletes an account; deactivating one (`User.is_active`) keeps the rows
   that reference it, and an admin cannot demote or deactivate themself.
+- Audit log: `AuditLog` rows record each create, update, and delete an audited
+  service makes (`src_back/services/audit_log.py`), with the signed-in account as the
+  actor. Accounts are audited at registration, on the admin's Users screen, and by the
+  seed; their history is admin-only, and a password change appears only masked.
+  Anyone signed in reads one record's history through `/api/v1/audit-logs`; admins
+  read and filter the whole log on the Audit tab of the admin screen.
 
 ## Test Fixtures
 
@@ -32,7 +38,7 @@ to put new behavior in the right service.
 - `inactive_user` - a persisted, deactivated account with the password `password123`
 - `auth_client` and `admin_client` - clients signed in as those accounts
 - `Widget` and `WidgetNote` - test-only models exercising the generic services and
-  `BaseSchema`
+  `BaseSchema`; `test_base_service.py` builds audited services over them
 - `PNG_BYTES` - a minimal PNG for upload tests
 
 The `app` fixture sets `app.test_client_class` to `SpaTestClient`, so every client the
@@ -42,6 +48,11 @@ client's `environ_base`.
 
 `src_back/tests/helpers.py` provides `persist(record)`, which adds a record, commits it,
 and returns it; use it instead of repeating those three lines.
+
+Building an `AuditTrail` registers its table for the rest of the run. A test that needs a
+known set of audited tables replaces the registry with
+`monkeypatch.setattr(audit_log, '_AUDITED_TABLES', {...})` inside the test or a fixture,
+as `test_audit_logs_api.py` does.
 
 The `app` fixture keeps one application context pushed for the whole test, and every
 test-client request reuses it. Flask-Login caches the loaded user on `g` for that

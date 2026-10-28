@@ -33,6 +33,20 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `services/base.py` in `create` and `update`. It compares names with straight and
   curly quotes treated alike but case still counting, and raises `DuplicateRecordError`
   from `services/errors.py`, which the handler answers with `conflict(str(exc))`.
+- A service opts into the audit log (`AuditLog`, `services/audit_log.py`) by passing
+  `audit_fields` to `CRUDService` or `ChildRecordService`, and `label_field` when its
+  records are not named by `name` (`None` for no label). `create` then logs the new
+  record's audited fields, `update` the ones it changed (`{field: {old, new}}`, and
+  nothing when none did), and `delete` the record's fields after `before_delete`, each
+  before the method's commit, so the entry and the change are saved together. The
+  actor is the signed-in account, `None` outside a request. A hand-written service
+  builds an `AuditTrail` and calls its `log_*` methods before committing, as
+  `services/users.py` does with `USER_AUDIT_TRAIL`, and records a secret, such as a
+  password, only as `MASKED_VALUE`. Building a trail registers its table, so one
+  record's history (`GET /api/v1/audit-logs`) is served only for audited tables.
+  `audit_admin_only=True` on a generic service, or `admin_only=True` on a trail, keeps
+  a table's history from non-admins, as for accounts, and no later trail can undo it.
+  A child record's entries belong to its own table, not its parent's.
 - Services raise the exceptions in `services/errors.py`, and the handler catches each
   one and answers with its envelope from `utils.py`: `DuplicateRecordError`,
   `RecordInUseError`, `ProtectedRecordError`, and `LastSignInMethodError` with
@@ -50,7 +64,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   query, so an unknown id fails with a 422. A schema that trims strings does it in a
   `@pre_load` hook, not `@post_load`: the `Length` validators generated from the
   columns run on the raw value, so a post-load trim still rejects a padded value of
-  the maximum length.
+  the maximum length. Every `DateTime` column serializes through `UTCDateTime`, in
+  UTC with an explicit offset: SQLite returns datetimes without one, and a browser
+  reads such a string as local time. A datetime field declared by hand uses
+  `UTCDateTime` too.
 - Auth is a Flask-Login session cookie. Every sign-in ends in `complete_login(user)`
   from `services/auth.py`, the only `login_user` call, so a new way to sign in (an
   OAuth callback, a passkey check) calls it too. It marks the session permanent, so
@@ -157,6 +174,11 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   when a save or delete settles, so `FormDialog` and `ConfirmDialog` cannot be
   dismissed while their request runs, and a dialog built another way must hold itself
   open the same way. `QueryState` renders a query's spinner, error, or data.
+- A record's detail view shows its history with `RecordAuditLogTab`, given the table
+  and the record's id; a form beside it passes `alsoInvalidate: [['audit-logs']]` to
+  its mutations so the history refreshes after a save. The admin screen's Audit tab is
+  `AdminAuditLogTab`. Both render `AuditLogTab`, which pages with `useInfiniteList`
+  and `InfiniteScrollSentinel`.
 - Component files export only components: `react-refresh/only-export-components` warns
   on any other export except a primitive constant, and CI fails on warnings, so shared
   constants and helpers live in `.ts` modules.

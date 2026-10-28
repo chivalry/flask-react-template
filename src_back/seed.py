@@ -27,7 +27,7 @@ from flask import Flask
 
 from src_back.extensions import db
 from src_back.models import Role, User
-from src_back.services.auth import find_user_by_email
+from src_back.services.auth import USER_AUDIT_TRAIL, find_user_by_email
 
 
 def seed(app: Flask) -> None:
@@ -57,6 +57,8 @@ def _seed_admin() -> None:
     It never changes or promotes an existing account: a later ``ADMIN_PASSWORD`` change
     resets nobody, and an account someone registered under ``ADMIN_EMAIL`` stays a plain
     user.
+
+    Its creation is audited, with no actor.
     """
     email = os.environ.get('ADMIN_EMAIL', '').strip()
     password = os.environ.get('ADMIN_PASSWORD', '')
@@ -72,7 +74,7 @@ def _seed_admin() -> None:
     user = User(email=email, role=Role.admin, is_active=True)
     user.set_password(password)
     db.session.add(user)
-    db.session.flush()
+    USER_AUDIT_TRAIL.log_created(user)
     print(f'Seeded admin {user.email}.')
 
 
