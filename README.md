@@ -221,13 +221,13 @@ project/
 ├── src_front/         # React application
 │   └── src/
 │       ├── api/       # Axios client, the resource() factory, typed API modules
-│       ├── components/  Shell, route guards, error boundaries, common/, admin/
+│       ├── components/  Shell, route guards, error boundaries, layout/, common/, admin/
 │       ├── hooks/     # TanStack Query hooks per resource, shared hooks
 │       ├── pages/     # Home, Login, Register, Admin
 │       ├── schemas/   # Zod form schemas and payload mappers
 │       ├── store/     # Zustand auth store
 │       ├── types/     # AuthUser, User, PaginatedResponse
-│       ├── utils/     # Local-day date helpers
+│       ├── utils/     # Local-day dates, record counts, account labels
 │       └── test/      # Vitest suite mirroring src/; utils/ has shared helpers
 ├── migrations/        # Alembic migrations (initial schema included)
 ├── docker/            # Dockerfiles, entrypoint, nginx, production override

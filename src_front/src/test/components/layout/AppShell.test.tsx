@@ -155,4 +155,23 @@ describe('AppShell', () => {
             within(screen.getByRole('main')).getByText('Outlet child content'),
         ).toBeInTheDocument()
     })
+
+    it('fills the visible viewport with a flex-column main that can shrink', () => {
+        renderShell()
+
+        const main = screen.getByRole('main')
+
+        // The shell is a flex column as tall as the viewport, and main takes the rest.
+        expect(main.parentElement).toHaveStyle({
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100dvh',
+        })
+        expect(main).toHaveStyle({
+            display: 'flex',
+            flexDirection: 'column',
+            flexGrow: '1',
+            minHeight: '0px',
+        })
+    })
 })

@@ -1,27 +1,22 @@
-/** @file Check that the writer sets or deletes one parameter and replaces history. */
+/**
+ * @file Check that the writer sets, deletes, or leaves one parameter, replacing the
+ * history entry unless it is built to push.
+ */
 
 import { act, renderHook, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { MemoryRouter, useLocation, useNavigationType } from 'react-router-dom'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
 import { useSearchParamWriter } from '../../hooks/useSearchParamWriter'
+import LocationProbe from '../utils/LocationProbe'
 
-/** Show the current query string and how the router reached the current entry. */
-function LocationProbe() {
-    const { search } = useLocation()
-    const navigationType = useNavigationType()
-    return (
-        <>
-            <output aria-label="Search">{search}</output>
-            <output aria-label="Navigation type">{navigationType}</output>
-        </>
-    )
-}
-
-/** Mount the writer in a memory router that starts at `url`, beside the probe. */
-function renderWriter(url: string) {
-    return renderHook(() => useSearchParamWriter(), {
+/**
+ * Mount the writer, built with `options`, in a memory router that starts at `url`,
+ * beside the probe.
+ */
+function renderWriter(url: string, options?: { push?: boolean }) {
+    return renderHook(() => useSearchParamWriter(options), {
         wrapper: ({ children }: { children: ReactNode }) => (
             <MemoryRouter initialEntries={[url]}>
                 {children}
@@ -52,5 +47,36 @@ describe('useSearchParamWriter', () => {
 
         expect(probe('Search')).toBe('?other=keep')
         expect(probe('Navigation type')).toBe('REPLACE')
+    })
+
+    it.each([
+        {
+            label: 'pushes a history entry when built to push',
+            url: '/?tab=history',
+            value: '2',
+            search: '?tab=history&user=2',
+            navigation: 'PUSH',
+        },
+        {
+            label: 'writes nothing when the parameter already holds the value',
+            url: '/?user=2',
+            value: '2',
+            search: '?user=2',
+            navigation: 'POP',
+        },
+        {
+            label: 'writes nothing when an absent parameter is cleared',
+            url: '/?tab=history',
+            value: '',
+            search: '?tab=history',
+            navigation: 'POP',
+        },
+    ])('$label', ({ url, value, search, navigation }) => {
+        const { result } = renderWriter(url, { push: true })
+
+        act(() => result.current('user', value))
+
+        expect(probe('Search')).toBe(search)
+        expect(probe('Navigation type')).toBe(navigation)
     })
 })

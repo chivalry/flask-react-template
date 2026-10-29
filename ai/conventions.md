@@ -179,6 +179,19 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   its mutations so the history refreshes after a save. The admin screen's Audit tab is
   `AdminAuditLogTab`. Both render `AuditLogTab`, which pages with `useInfiniteList`
   and `InfiniteScrollSentinel`.
+- A page that lists records beside the selected one is a `MasterDetailLayout`
+  (`components/layout/`): from `md` up the list and the detail sit side by side, and
+  below it one shows at a time, with a Back button, and focus moves to the pane that
+  appears. `AppShell` fills the visible viewport and gives `main` a definite height,
+  so each pane scrolls on its own under the app bar. `ListPaneHeader` heads the list
+  with its title, a count in a polite status region, and an action such as New. The
+  detail opens with a `DetailHeader`, lays its sections out in `DetailColumns` (two
+  columns from `lg`) and its captioned rows in `LabeledRow`, and shows a record's
+  child lists in a `ChildPortal`, tabs that become a select below `sm`. The page keeps
+  its UI state in the URL with `useSearchParamWriter`: the selected record with
+  `{ push: true }`, so Back returns from a record to the list, and a tab or a filter
+  replacing the entry. `components/admin/UsersMasterDetail.tsx`, which an admin sees
+  on Home, is the example.
 - Component files export only components: `react-refresh/only-export-components` warns
   on any other export except a primitive constant, and CI fails on warnings, so shared
   constants and helpers live in `.ts` modules.
@@ -188,9 +201,16 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - Tests mirror `src/` under `src/test/`, so `src/components/common/RecordSection.tsx`
   is tested in `test/components/common/RecordSection.test.tsx`. Shared helpers live in
   `test/utils/`: `Providers` and `renderWithProviders` (a query client and a router),
-  `FormHarness`, the dialog queries, and the `adminUser` and `plainUser` fixtures.
-  `test/globalSetup.ts` pins `TZ` to `America/Los_Angeles`, where date-only bugs show,
-  and `test/setup.ts` stubs `IntersectionObserver`, which jsdom lacks.
+  `FormHarness`, `LocationProbe`, the dialog queries, and the `adminUser` and
+  `plainUser` fixtures. `test/globalSetup.ts` pins `TZ` to `America/Los_Angeles`,
+  where date-only bugs show, and `test/setup.ts` stubs `IntersectionObserver` and
+  `matchMedia`, which jsdom lacks, with `matchMedia` answering as a 1280 px viewport;
+  `stubViewportWidth(375)` from `test/utils/viewport.ts` gives a test a phone. jsdom
+  applies no media query with a feature, and MUI puts every responsive `sx` value
+  behind one, so a layout a test must check at a breakpoint reads it with
+  `useMediaQuery(theme.breakpoints.up('md'))`, `theme` coming from `useTheme()`, as
+  `MasterDetailLayout` and `ChildPortal` do: the callback form throws without a
+  `ThemeProvider`, which tests do not render.
 
 ## Shell Scripts
 

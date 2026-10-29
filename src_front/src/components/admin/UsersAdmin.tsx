@@ -2,19 +2,10 @@
 
 import { useUserMutations, useUsers } from '../../hooks/users'
 import type { User, UserPayload } from '../../types/users'
+import { describeUser } from '../../utils/users'
 import QueryState from '../common/QueryState'
 import RecordSection from '../common/RecordSection'
 import UserFormDialog from './UserFormDialog'
-
-/**
- * Describe an account's role and whether it is deactivated.
- *
- * @param user - The account.
- * @returns For example `admin` or `user · inactive`.
- */
-function describeUser(user: User): string {
-    return user.is_active ? user.role : `${user.role} · inactive`
-}
 
 /**
  * Render an account's email.
