@@ -125,12 +125,13 @@ CHOWN="docker run --rm -v $UPLOADS_VOLUME:/uploads alpine"
 CHOWN+=" chown -R $IMAGE_UID:$IMAGE_UID /uploads"
 
 # .env.staging.example is a whole staging .env: it deploys staging from the staging
-# branch, behind a password, and every key it sets is one .env.example documents. The
-# APP_NAME check keeps the loop from passing on an empty list.
+# branch, behind a password, with mail off, and every key it sets is one .env.example
+# documents. The APP_NAME check keeps the loop from passing on an empty list.
 STAGING_EXAMPLE="$REPO_DIR/.env.staging.example"
 assert_contains '^APP_ENVIRONMENT=staging$' "$STAGING_EXAMPLE"
 assert_contains '^DEPLOY_BRANCH=staging$' "$STAGING_EXAMPLE"
 assert_contains '^STAGING_HTPASSWD=/' "$STAGING_EXAMPLE"
+assert_contains '^SMTP_HOST=$' "$STAGING_EXAMPLE"
 sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' "$STAGING_EXAMPLE" > "$TEST_DIR/staging-keys"
 assert_contains '^APP_NAME$' "$TEST_DIR/staging-keys"
 while IFS= read -r key; do

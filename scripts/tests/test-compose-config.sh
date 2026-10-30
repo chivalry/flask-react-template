@@ -2,7 +2,8 @@
 # Render the development and production Compose configurations and check that only the
 # development stack carries file watch, watchdog, and backend source owned by the app
 # user, that every watched path exists and migrations sync without restarting the
-# backend, that neither stack overrides the image's user, and what the production stack
+# backend, that neither stack overrides the image's user, that both pass the .env's
+# SMTP_* variables to the backend, blank when unset, and what the production stack
 # must keep: loopback-only ports and no database port; a backend that runs
 # docker/entrypoint.sh under FLASK_ENV=production, where it starts gunicorn, with
 # GUNICORN_WORKERS, secure session cookies, and the .env's APP_ENVIRONMENT passed
@@ -23,7 +24,7 @@ trap 'rm -rf "$TEST_DIR"' EXIT
 # keeps a developer's .env out of the renders, and the shell must not supply the files
 # or the values the checks read.
 unset COMPOSE_FILE GUNICORN_WORKERS SESSION_COOKIE_SECURE SESSION_COOKIE_SAMESITE \
-  APP_ENVIRONMENT
+  APP_ENVIRONMENT SMTP_HOST SMTP_PORT SMTP_SECURITY SMTP_USERNAME SMTP_PASSWORD SMTP_FROM
 : > "$TEST_DIR/empty.env"
 export POSTGRES_USER=app POSTGRES_PASSWORD=app POSTGRES_DB=app SECRET_KEY=placeholder \
   DATABASE_URL=postgresql://app:app@db:5432/app CORS_ALLOWED_ORIGINS=http://localhost \
@@ -43,6 +44,15 @@ render -f docker-compose.yml -f docker/docker-compose.prod.yml > "$TEST_DIR/prod
   export APP_ENVIRONMENT=staging
   render -f docker-compose.yml -f docker/docker-compose.prod.yml
 ) > "$TEST_DIR/prod-staging.json"
+
+(
+  export SMTP_HOST=smtp.example.com SMTP_PORT=2525 SMTP_SECURITY=ssl \
+    SMTP_USERNAME=mailer@example.com SMTP_PASSWORD=app-password \
+    SMTP_FROM=noreply@example.com
+  render > "$TEST_DIR/dev-smtp.json"
+  render -f docker-compose.yml -f docker/docker-compose.prod.yml \
+    > "$TEST_DIR/prod-smtp.json"
+)
 
 # check STACK FILTER EXPECTATION -> fail unless jq's FILTER holds for STACK's render.
 check() {
@@ -106,6 +116,20 @@ check prod '.services.backend.environment.APP_ENVIRONMENT == ""' \
   'a blank APP_ENVIRONMENT, which the backend reads as production'
 check prod-staging '.services.backend.environment.APP_ENVIRONMENT == "staging"' \
   'APP_ENVIRONMENT passed through to the backend'
+
+# Mail stays off until the .env names a host, and every SMTP_* value it gives reaches
+# the backend in both stacks.
+for stack in dev prod; do
+  check "$stack" '.services.backend.environment | [.SMTP_HOST, .SMTP_PORT,
+    .SMTP_SECURITY, .SMTP_USERNAME, .SMTP_PASSWORD, .SMTP_FROM] | all(. == "")' \
+    'blank SMTP_* variables, which leave mail off'
+  check "$stack-smtp" '.services.backend.environment | .SMTP_HOST == "smtp.example.com"
+    and .SMTP_PORT == "2525" and .SMTP_SECURITY == "ssl"
+    and .SMTP_USERNAME == "mailer@example.com" and .SMTP_PASSWORD == "app-password"
+    and .SMTP_FROM == "noreply@example.com"' \
+    'the SMTP_* variables its .env gives passed through to the backend'
+done
+
 check prod '.services.frontend.build.dockerfile == "docker/nginx.Dockerfile"' \
   'the nginx image as its frontend'
 

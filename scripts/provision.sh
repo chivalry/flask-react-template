@@ -111,6 +111,16 @@ GUNICORN_WORKERS=4
 ADMIN_EMAIL=
 ADMIN_PASSWORD=$ADMIN_PASS
 
+# --- Outgoing mail (src_back/mailer.py) -----------------------------------------
+# A blank SMTP_HOST keeps mail off. SMTP_SECURITY is starttls (port 587), ssl (465), or
+# none; SMTP_FROM defaults to SMTP_USERNAME and must be an email address.
+SMTP_HOST=
+SMTP_PORT=
+SMTP_SECURITY=starttls
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM=
+
 # --- Loopback ports published by Compose; host nginx proxies to them -------------
 BACKEND_PORT=5000
 FRONTEND_HOST_PORT=8080
@@ -145,6 +155,7 @@ ENV
   echo "    .env created at $REPO_DIR/.env (mode 600)."
   echo "    Fill in CERTBOT_EMAIL, ALERT_WEBHOOK_URL, and SPACES_* before running the"
   echo "    steps that use them."
+  echo "    Mail stays off until SMTP_HOST and the other SMTP_* values are filled in."
   echo "    Fill in ADMIN_EMAIL before the first deploy; that admin signs in with the"
   echo "    generated ADMIN_PASSWORD."
 fi

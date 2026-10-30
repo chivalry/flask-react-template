@@ -20,6 +20,8 @@ production in:
   `<COMPOSE_PROJECT_NAME>_postgres_data` and `<COMPOSE_PROJECT_NAME>_uploads_data`;
 - the session cookie: `APP_ENVIRONMENT=staging` names it `staging_session`, so a sign-in
   on staging never replaces production's;
+- mail, which stays off: `SMTP_HOST` is blank, because `scripts/copy-production.sh`
+  fills staging with production's accounts, and mail to them would reach real people;
 - access: `STAGING_HTPASSWD` names an htpasswd file, and host nginx then asks for a
   password before it serves any page or API call.
 
@@ -64,9 +66,10 @@ is `my-app-staging`.
     cp .env.staging.example .env && chmod 600 .env
     ```
 
-3. Fill in every blank in `.env`. Generate each secret with `openssl rand -hex 32`, and
-   repeat `POSTGRES_PASSWORD` inside `DATABASE_URL`. Set both `CORS_ALLOWED_ORIGINS`
-   and `PUBLIC_BASE_URL` to `https://<DOMAIN>`. `PRODUCTION_DIR` must name production's
+3. Fill in every blank in `.env` except `SMTP_HOST`, which stays blank so staging sends
+   no mail. Generate each secret with `openssl rand -hex 32`, and repeat
+   `POSTGRES_PASSWORD` inside `DATABASE_URL`. Set both `CORS_ALLOWED_ORIGINS` and
+   `PUBLIC_BASE_URL` to `https://<DOMAIN>`. `PRODUCTION_DIR` must name production's
    clone, and `STAGING_HTPASSWD` the file the next step creates.
 4. Create the password file. `openssl passwd -6` asks for the password twice, and
    testers sign in as `tester` with it. The group and mode let nginx, which runs as

@@ -24,6 +24,8 @@ that every contributor and agent follows.
     - `app.py` - application factory, error handlers, SPA and upload serving
     - `auth.py` - `current_user` typed as `User`, for routes behind `@login_required`
     - `extensions.py` - shared Flask extensions and the declarative `Base`
+    - `mailer.py` - plain-text email through the SMTP account in `SMTP_*`, standard
+      library only; off while `SMTP_HOST` is blank
     - `seed.py` - the seed every container start runs; it creates the first admin
     - `utils.py` - error envelopes, pagination in memory and in SQL, query-string
       parsing, quote folding, upload validation
@@ -132,10 +134,30 @@ names the deployment, production when blank. `/api/health` reports it, the front
 badges every page outside production, and any other environment names its own session
 cookie. `DEPLOY_BRANCH` is the branch a server clone must be on.
 
+Mail is off until `SMTP_HOST` is set: `smtp_settings_from_environment()` in
+`src_back/mailer.py` returns `None` while it is blank, and code that sends mail then
+skips it. `SMTP_SECURITY` is `starttls` (the default, port 587), `ssl` (465), or `none`,
+and `SMTP_PORT` overrides the port. The sender is `SMTP_FROM`, or `SMTP_USERNAME` when
+that is blank, and must be an email address. `send_email()` sends one plain-text
+message and raises `EmailDeliveryError` when the server refuses it or cannot be reached.
+Staging keeps `SMTP_HOST` blank, because its accounts are copies of production's, and a
+server provisioned before the mailer has no `SMTP_*` lines in its `.env`, which leaves
+mail off there until they are added. To check the settings, send a test message.
+Compose hands `.env`'s values to a container only when it creates one, so on a server,
+redeploy (`npm run deploy`) after changing `SMTP_*`, then run it in the backend
+container:
+
+```bash
+.venv/bin/python -m src_back.mailer you@example.com      # locally, reading .env
+docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml --env-file .env \
+  exec -T backend python -m src_back.mailer you@example.com   # on a server
+```
+
 `src_back/app.py` calls `load_dotenv()` at import, so `.env` values are visible to pytest
 too. A test that depends on an environment variable sets or clears it with
 `monkeypatch` first, as the `FLASK_ENV` and `CORS_ALLOWED_ORIGINS` tests in
-`src_back/tests/test_app.py` do; `conftest.py` clears `APP_ENVIRONMENT` for every test.
+`src_back/tests/test_app.py` do; `conftest.py` clears `APP_ENVIRONMENT` and the `SMTP_*`
+variables for every test, so no test sends mail through a developer's account.
 
 ## Worktrees
 
