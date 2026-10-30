@@ -200,7 +200,10 @@ The `devDependencies` in `package.json`.
   the lock file out. CI runs `prettier --check .`.
 - **markdownlint-cli2**: lints Markdown with the rules in `.markdownlint.json`:
   90-character lines and 4-space nested lists. `npm run lint:md` and CI skip `plans/`;
-  lint-staged checks every staged Markdown file, plans included.
+  lint-staged checks every staged Markdown file, plans included. `package.json`
+  overrides its `re2js` dependency to 2.8.7: markdownlint pins 2.8.6 exactly, a version
+  with a high-severity advisory (GHSA-gg6h-894w-4m9c) that fails CI's `npm audit`. Drop
+  the override once a markdownlint release pins 2.8.7 or later.
 - **fallow**: audits the frontend for dead code, duplication, and complexity, from the
   entry points in `.fallowrc.json`. It runs on every commit and in CI against the base
   branch.
