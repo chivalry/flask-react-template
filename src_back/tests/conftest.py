@@ -25,6 +25,16 @@ PNG_BYTES = (
     b'\x00\x00\x00\x00IEND\xaeB`\x82'
 )
 
+# The variables src_back/mailer.py reads; _clear_smtp_environment unsets every one.
+SMTP_VARIABLES = (
+    'SMTP_HOST',
+    'SMTP_PORT',
+    'SMTP_SECURITY',
+    'SMTP_USERNAME',
+    'SMTP_PASSWORD',
+    'SMTP_FROM',
+)
+
 
 class Widget(BaseMixin, Base):
     """Test-only parent model for exercising the generic services and schemas."""
@@ -56,6 +66,15 @@ def _clear_app_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     # src_back.app loads .env at import; a developer's APP_ENVIRONMENT would rename the
     # session cookie that test_auth.py reads.
     monkeypatch.delenv('APP_ENVIRONMENT', raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _clear_smtp_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    # src_back.app loads .env at import, where a developer's SMTP_* settings would let a
+    # test send real mail. Every test starts with mail off, and a mailer test sets what
+    # it needs.
+    for name in SMTP_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture()

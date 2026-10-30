@@ -33,7 +33,8 @@ only explains what each one is for.
 ## Backend runtime libraries
 
 Installed from `requirements.txt` into the backend image and into `.venv`, except
-watchdog, which only the dev stack's backend image gets.
+watchdog, which only the dev stack's backend image gets, and the standard-library
+modules in the last entry, which come with Python.
 
 - **Flask**: the web framework. `src_back/app.py` builds the app through a factory,
   registers one blueprint per domain, maps exceptions to JSON error envelopes, and
@@ -74,9 +75,10 @@ watchdog, which only the dev stack's backend image gets.
 - **filetype**: sniffs the MIME type of an uploaded file from its first bytes, so
   `validate_image_file()` trusts the content rather than the extension.
 - **python-dotenv**: loads `.env` when `src_back/app.py` is imported, so the `flask`
-  command, the seed, and pytest read the same settings on the host. In the containers
-  Compose supplies the variables instead, and `.dockerignore` keeps `.env` out of the
-  image.
+  command, the seed, and pytest read the same settings on the host;
+  `python -m src_back.mailer`, which never imports the app, loads it itself. In the
+  containers Compose supplies the variables instead, and `.dockerignore` keeps `.env`
+  out of the image.
 - **gunicorn**: the production WSGI server. `docker/entrypoint.sh` starts it after the
   migrations and the seed whenever `FLASK_ENV` is not `development`, with
   `GUNICORN_WORKERS` workers: 2 by default, 4 in the production override. The dev stack
@@ -85,6 +87,9 @@ watchdog, which only the dev stack's backend image gets.
   backend image through the `DEVELOPMENT_PACKAGES` build argument. Flask's reloader uses
   it when present and then notices modules being added and deleted, which its fallback
   stat reloader misses.
+- **`smtplib` and `email`**: the standard-library modules `src_back/mailer.py` sends
+  mail with. No mail package is installed: these work with any provider that speaks
+  SMTP, while a vendor SDK, such as SendGrid's, would tie the app to one.
 
 ## Backend quality and test tools
 

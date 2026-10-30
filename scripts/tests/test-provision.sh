@@ -132,8 +132,8 @@ assert_contains 'usage: bash scripts/provision\.sh <domain>' "$TEST_DIR/stderr"
   { echo 'provision.sh ran commands without a domain:' >&2; cat "$COMMANDS" >&2; exit 1; }
 
 # A fresh server gets a mode 600 .env with the clone's name, the domain, the three
-# generated secrets, and every retention setting, and the Docker apt source for its
-# release.
+# generated secrets, every retention setting, and blank mail settings, and the Docker
+# apt source for its release.
 start_test_case
 run_provision
 [ "$(find "$ENV_FILE" -perm 600)" = "$ENV_FILE" ] ||
@@ -149,6 +149,12 @@ assert_contains '^RETAIN_MONTHLY=6$' "$ENV_FILE"
 assert_contains '^RETAIN_LOCAL_DAILY=7$' "$ENV_FILE"
 assert_contains '^APP_ENVIRONMENT=production$' "$ENV_FILE"
 assert_contains '^DEPLOY_BRANCH=main$' "$ENV_FILE"
+assert_contains '^SMTP_HOST=$' "$ENV_FILE"
+assert_contains '^SMTP_PORT=$' "$ENV_FILE"
+assert_contains '^SMTP_SECURITY=starttls$' "$ENV_FILE"
+assert_contains '^SMTP_USERNAME=$' "$ENV_FILE"
+assert_contains '^SMTP_PASSWORD=$' "$ENV_FILE"
+assert_contains '^SMTP_FROM=$' "$ENV_FILE"
 # The heredoc is unquoted, so the backups comment names the real directory.
 assert_contains '^# /var/backups/my-app/daily\. ' "$ENV_FILE"
 assert_contains '^POSTGRES_PASSWORD=1{32}$' "$ENV_FILE"
@@ -181,6 +187,7 @@ expect_calls '^sudo ' \
   'sudo systemctl start nginx'
 refute_contains '^sudo reboot$' "$COMMANDS"
 assert_contains 'Log out and back in' "$OUTPUT"
+assert_contains 'Mail stays off until SMTP_HOST' "$OUTPUT"
 
 # APP_NAME in the environment replaces the clone's name.
 start_test_case

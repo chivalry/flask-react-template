@@ -211,6 +211,7 @@ project/
 │   ├── app.py         # Application factory, error handlers, SPA and uploads
 │   ├── auth.py        # current_user typed as User
 │   ├── extensions.py  # db (SQLAlchemy 2 Base), migrate, login_manager
+│   ├── mailer.py      # Plain-text SMTP mail; off while SMTP_HOST is blank
 │   ├── models/        # Package: base.py has BaseMixin, user.py has Role and User
 │   ├── utils.py       # Error envelopes, pagination, parsing, upload checks
 │   ├── api/           # Blueprints (health, auth, users, audit logs)
