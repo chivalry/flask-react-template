@@ -126,16 +126,19 @@ function UserMenu() {
 /**
  * Render the navigation bar and an outlet for the active route.
  *
- * Below the `sm` breakpoint the bar tightens its spacing, the buttons shrink to
- * their icons, and the email hides, so it fits a phone-width screen. The outlet
- * has its own Suspense boundary, so the bar stays on screen while a page's chunk
- * loads.
+ * Below the `sm` breakpoint the bar tightens its spacing, the buttons shrink to their
+ * icons, and the email hides, so it fits a phone-width screen. The shell is as tall as
+ * the visible viewport (`100dvh`, which leaves out a phone browser's toolbars, where
+ * `100vh` does not), and the main region is a flex column with no minimum height, so a
+ * page such as a `MasterDetailLayout` fills it and scrolls its own panes under the bar; a
+ * taller page still scrolls the document. The outlet has its own Suspense boundary, so
+ * the bar stays on screen while a page's chunk loads.
  *
  * @returns The application shell.
  */
 export default function AppShell() {
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
             <AppBar position="static">
                 <Toolbar sx={{ gap: { xs: 0.5, sm: 2 } }}>
                     <Typography
@@ -150,7 +153,10 @@ export default function AppShell() {
                     <UserMenu />
                 </Toolbar>
             </AppBar>
-            <Box component="main" sx={{ flex: 1, minHeight: 0 }}>
+            <Box
+                component="main"
+                sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
+            >
                 <Suspense fallback={null}>
                     <Outlet />
                 </Suspense>

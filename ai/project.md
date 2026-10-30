@@ -29,15 +29,18 @@ that every contributor and agent follows.
       parsing, quote folding, upload validation
 - Frontend: `src_front/src/` - React/TypeScript with Vite
     - `api/` - axios client, the `resource()` factory, and typed API modules
-    - `components/` - React components; `components/layout/AppShell.tsx` is the shell,
-      `components/common/` holds the form and record-list kit, and
-      `components/admin/` the admin screens
+    - `components/` - React components; `components/layout/` holds `AppShell.tsx`, the
+      shell, and the master-detail layout (`MasterDetailLayout`, `ListPaneHeader`,
+      `ChildPortal`); `components/common/` holds the form, record-list, and detail
+      kit; and `components/admin/` the admin screens and `UsersMasterDetail`, the
+      example an admin sees on Home
     - `hooks/` - shared hooks, including the TanStack Query hooks for each resource
     - `pages/` - top-level page components
     - `schemas/` - Zod form schemas, their defaults, and their payload mappers
     - `store/` - Zustand stores
     - `types/` - TypeScript types shared across modules
-    - `utils/` - framework-free helpers, such as local-day dates
+    - `utils/` - framework-free helpers, such as local-day dates, record counts, and
+      account descriptions
     - `test/` - Vitest tests mirroring `src/`; `test/utils/` holds the shared helpers
 - `ai/` - these instructions; `AGENTS.md` and `.claude/CLAUDE.md` point here
 - `docker/` - Dockerfiles, entrypoint, nginx config, production Compose override

@@ -90,5 +90,8 @@
     "typescript-eslint": "^8.22.0",
     "vite": "^6.1.0",
     "vitest": "^4.1.7"
+  },
+  "overrides": {
+    "re2js": "2.8.7"
   }
 }

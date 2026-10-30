@@ -36,13 +36,15 @@ function syncSignedInUser(user: User) {
  * Build the create and update mutations for accounts.
  *
  * The server has no delete route, so there is no `remove`, and a record section
- * given these mutations offers no Delete. An update to the signed-in account also
- * replaces the auth store's copy of it.
+ * given these mutations offers no Delete. A save also refreshes the audit log, so an
+ * account's history beside the form shows the change, and an update to the signed-in
+ * account replaces the auth store's copy of it.
  *
  * @returns The create and update mutations.
  */
 export function useUserMutations() {
     const { create, update } = useResourceMutations(USERS_KEY, usersApi, {
+        alsoInvalidate: [['audit-logs']],
         onUpdated: syncSignedInUser,
     })
     return { create, update }

@@ -47,7 +47,7 @@ describe('account hooks', () => {
         expect(Object.keys(result.current.mutations)).toEqual(['create', 'update'])
     })
 
-    it('create sends the payload, then invalidates the account list', async () => {
+    it('create sends the payload, then invalidates users and audit logs', async () => {
         vi.mocked(usersApi.create).mockResolvedValue(plainUser)
         const { result } = renderUserMutations()
         const invalidateQueries = vi.spyOn(result.current.client, 'invalidateQueries')
@@ -57,7 +57,10 @@ describe('account hooks', () => {
         })
 
         expect(usersApi.create).toHaveBeenCalledWith(payload)
-        expect(invalidateQueries.mock.calls).toEqual([[{ queryKey: ['users'] }]])
+        expect(invalidateQueries.mock.calls).toEqual([
+            [{ queryKey: ['users'] }],
+            [{ queryKey: ['audit-logs'] }],
+        ])
     })
 
     it('update of the signed-in account replaces the stored user', async () => {

@@ -73,7 +73,7 @@ describe('App', () => {
     })
 
     it('renders the shell and the home page at / when signed in', async () => {
-        signedIn()
+        signedIn(plainUser)
 
         renderAppAtPath('/')
 
@@ -84,11 +84,22 @@ describe('App', () => {
             'href',
             '/',
         )
-        expect(within(appBar).getByText(adminUser.email)).toBeInTheDocument()
+        expect(within(appBar).getByText(plainUser.email)).toBeInTheDocument()
+    })
+
+    it('shows an admin the accounts on the home page', async () => {
+        signedIn()
+
+        renderAppAtPath('/')
+
+        expect(
+            await screen.findByRole('heading', { level: 1, name: 'Users' }),
+        ).toBeInTheDocument()
+        expect(usersApi.list).toHaveBeenCalledTimes(1)
     })
 
     it('redirects unknown paths to /', async () => {
-        signedIn()
+        signedIn(plainUser)
 
         renderAppAtPath('/nope')
 
