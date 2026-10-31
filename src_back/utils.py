@@ -1,20 +1,24 @@
-"""Shared helpers for JSON error envelopes, pagination, request parsing, and uploads.
+"""Shared helpers for error envelopes, pagination, parsing, uploads, and CSV downloads.
 
 Every error helper returns the ``{'error': message}`` envelope paired with its
 HTTP status code, so route handlers can ``return`` one directly. The quote-folding
 helpers compare text with straight and curly quotes treated as the same character.
 """
 
+import csv
 import functools
 import math
 import uuid as uuid_lib
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, date, datetime
+from decimal import Decimal
+from io import BytesIO, StringIO
+from itertools import chain
 from pathlib import Path
 from typing import Any, cast
 
 import filetype
-from flask import Response, current_app, jsonify, request
+from flask import Response, current_app, jsonify, request, send_file
 from flask_login import current_user
 from marshmallow import Schema
 from sqlalchemy import ColumnElement, Select, func, select
@@ -36,6 +40,13 @@ QUOTE_FOLDS = {'‘': "'", '’': "'", '“': '"', '”': '"'}
 """Each curly quote and the straight quote it matches."""
 
 _QUOTE_TRANSLATION = str.maketrans(QUOTE_FOLDS)
+
+_FORMULA_PREFIXES = tuple('=+-@\t\r\n＝＋－＠')
+"""What a spreadsheet may read as the start of a formula, from OWASP's CSV page.
+
+The last four are the full-width forms of ``=``, ``+``, ``-``, and ``@``, which some
+regional settings treat the same way.
+"""
 
 ErrorResponse = tuple[Response, int]
 """A JSON error envelope paired with its HTTP status code."""
@@ -461,6 +472,58 @@ def delete_upload(filename: str | None) -> None:
     path = safe_join(current_app.config['UPLOAD_FOLDER'], filename)
     if path is not None:
         Path(path).unlink(missing_ok=True)
+
+
+def _neutralize_formula(cell: object) -> object:
+    """Keep a spreadsheet from reading a CSV cell as a formula.
+
+    A leading single quote makes a spreadsheet treat the cell as text. Numbers and blanks
+    pass through: neither can carry a formula, and the quote would turn a negative amount
+    into text that ``SUM`` skips. Anything else is checked as its ``str()``.
+
+    Args:
+        cell: One value of a row.
+
+    Returns:
+        The value to hand to ``csv.writer``.
+    """
+    if cell is None or isinstance(cell, int | float | Decimal):
+        return cell
+    text = str(cell)
+    return f"'{text}" if text.startswith(_FORMULA_PREFIXES) else text
+
+
+def csv_response(
+    rows: Iterable[Sequence[object]], filename: str, header: Sequence[str]
+) -> Response:
+    """Build a CSV attachment with formula text neutralized.
+
+    Every cell goes through :func:`_neutralize_formula`, so text a user typed, such as
+    ``=HYPERLINK(...)``, opens as text; pass numbers as numbers, because text that only
+    looks numeric gains the quote. Only the start of a cell is checked, so a spreadsheet
+    that splits on ``;`` still opens ``x;=1+1`` as two cells. The ``utf-8-sig`` encoding
+    adds the byte order mark, without which Excel reads the body in the local code page.
+    ``send_file`` writes the attachment header, which keeps a filename beyond ASCII
+    legal, so this must run inside a request.
+
+    Args:
+        rows: The data rows, in order, each a sequence of cells.
+        filename: The name browsers save the file under.
+        header: The column names, written as the first row.
+
+    Returns:
+        The response, of type ``text/csv; charset=utf-8``, with the file attached.
+    """
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    for row in chain([header], rows):
+        writer.writerow([_neutralize_formula(cell) for cell in row])
+    return send_file(
+        BytesIO(buffer.getvalue().encode('utf-8-sig')),
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 def admin_required[**P, R](f: Callable[P, R]) -> Callable[P, R | ErrorResponse]:

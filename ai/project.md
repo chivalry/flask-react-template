@@ -30,9 +30,10 @@ that every contributor and agent follows.
       library only; off while `SMTP_HOST` is blank
     - `seed.py` - the seed every container start runs; it creates the first admin
     - `utils.py` - error envelopes, pagination in memory and in SQL, query-string
-      parsing, quote folding, upload validation
+      parsing, quote folding, upload validation, CSV responses
 - Frontend: `src_front/src/` - React/TypeScript with Vite
-    - `api/` - axios client, the `resource()` factory, and typed API modules
+    - `api/` - axios client, the `resource()` factory, `downloadFile()`, and typed API
+      modules
     - `components/` - React components; `components/layout/` holds `AppShell.tsx`, the
       shell, and the master-detail layout (`MasterDetailLayout`, `ListPaneHeader`,
       `ChildPortal`); `components/common/` holds the form, record-list, and detail

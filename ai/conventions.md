@@ -127,6 +127,14 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `per_page` capped at 100.
 - Image uploads go through `validate_image_file()`; stored files are served from
   `/uploads/<filename>` to signed-in users only; bodies over 25 MB return `413`.
+- A CSV export answers with `csv_response(rows, filename, header)` from `utils.py`, never
+  a hand-built response. It writes the byte order mark Excel needs and puts a single
+  quote before text that starts a cell with a formula character, so a note a user typed,
+  such as `=HYPERLINK(...)`, opens as text. It checks only the start of a cell: where a
+  spreadsheet splits on `;`, a cell holding `x;=1+1` still opens as two. Numbers pass
+  through, which keeps a negative amount a number, so pass model values rather than a
+  schema's dump: a `Decimal` field with `as_string=True` dumps `-5.00` as text, which
+  gains the quote.
 
 ## Frontend
 
@@ -134,6 +142,14 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `X-Requested-With: XMLHttpRequest` header that the backend requires on every request
   that changes data. Its interceptors copy the server's `error` text onto
   `error.message` and notify the auth store on a 401.
+- A file download goes through `downloadFile(path, filename)` from `api/downloads.ts`. Its
+  `path` is relative to the API base, like every call through the client, so a stored
+  file under `/uploads`, outside that base, needs a plain link. Going through the client
+  keeps the session handling: a 401 reports a lost session, and a failure rejects with
+  the server's `error` text, which `surfaceApiError` reads out of the blob, for
+  `useApiError` to show. It sets no timeout, because the client's 15 seconds would cover
+  the whole transfer; gunicorn's 30-second worker limit still applies to building the
+  file, so an export that needs longer fails with a 502 from nginx.
 - The Zustand auth store holds the signed-in user. `fetchMe()` runs once on mount and
   `ProtectedRoute` waits for it; login and register store the user from their own
   response, as an admin's edit of their own account does from the update's, and a
