@@ -1,7 +1,9 @@
+import csv
 import io
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -24,6 +26,7 @@ from src_back.utils import (
     admin_required,
     bad_request,
     conflict,
+    csv_response,
     delete_upload,
     dump_or_404,
     fold_quotes,
@@ -465,6 +468,101 @@ def test_delete_upload_leaves_files_outside_the_upload_folder(app: Flask) -> Non
     delete_upload('../outside.txt')
     delete_upload(str(outside))
     assert outside.exists()
+
+
+# -- csv_response -------------------------------------------------------------
+
+
+class _FormulaText:
+    def __str__(self) -> str:
+        return '=SUM(A1)'
+
+
+def _csv_export(
+    app: Flask,
+    rows: Iterable[Sequence[object]],
+    *,
+    header: Sequence[str] = ('Note',),
+    filename: str = 'notes.csv',
+) -> Response:
+    with app.test_request_context():
+        response = csv_response(rows, filename, header)
+    # send_file leaves the body for the server to send; a test reads it here instead.
+    response.direct_passthrough = False
+    return response
+
+
+def _csv_cells(response: Response) -> list[list[str]]:
+    text = response.get_data().decode('utf-8-sig')
+    return list(csv.reader(io.StringIO(text, newline='')))
+
+
+def test_csv_response_writes_a_byte_order_mark_then_the_header_and_rows(
+    app: Flask,
+) -> None:
+    response = _csv_export(app, [['Ada', 'Hi']], header=('Name', 'Note'))
+    assert response.get_data() == b'\xef\xbb\xbfName,Note\r\nAda,Hi\r\n'
+
+
+def test_csv_response_attaches_utf_8_csv_under_the_filename(app: Flask) -> None:
+    response = _csv_export(app, [], filename='accounts.csv')
+    assert response.headers['Content-Type'] == 'text/csv; charset=utf-8'
+    assert response.headers['Content-Disposition'] == 'attachment; filename=accounts.csv'
+
+
+def test_csv_response_encodes_a_filename_beyond_ascii(app: Flask) -> None:
+    response = _csv_export(app, [], filename='Résumé.csv')
+    assert response.headers['Content-Disposition'] == (
+        "attachment; filename=Resume.csv; filename*=UTF-8''R%C3%A9sum%C3%A9.csv"
+    )
+
+
+@pytest.mark.parametrize(
+    'cell',
+    [
+        '=SUM(A1)',
+        '+1',
+        '-1',
+        '@SUM(A1)',
+        '\tSUM(A1)',
+        '\rSUM(A1)',
+        '\nSUM(A1)',
+        '＝SUM(A1)',
+        '＋1',
+        '－1',
+        '＠SUM(A1)',
+    ],
+)
+def test_csv_response_quotes_text_a_spreadsheet_could_run(app: Flask, cell: str) -> None:
+    assert _csv_cells(_csv_export(app, [[cell]])) == [['Note'], [f"'{cell}"]]
+
+
+def test_csv_response_quotes_the_header_too(app: Flask) -> None:
+    assert _csv_cells(_csv_export(app, [], header=('=Note',))) == [["'=Note"]]
+
+
+def test_csv_response_leaves_numbers_numeric_and_blanks_empty(app: Flask) -> None:
+    response = _csv_export(app, [[-1, -1.5, Decimal('-5.00'), 0, None, '']])
+    assert _csv_cells(response)[1] == ['-1', '-1.5', '-5.00', '0', '', '']
+
+
+def test_csv_response_checks_any_other_value_as_text(app: Flask) -> None:
+    response = _csv_export(app, [[date(2026, 10, 31), _FormulaText()]])
+    assert _csv_cells(response)[1] == ['2026-10-31', "'=SUM(A1)"]
+
+
+def test_csv_response_leaves_a_formula_character_later_in_a_cell(app: Flask) -> None:
+    assert _csv_cells(_csv_export(app, [['a=b']]))[1] == ['a=b']
+
+
+def test_csv_response_escapes_separators_and_keeps_text_beyond_ascii(app: Flask) -> None:
+    rows = [['x,y', 'q"r', 'Résumé']]
+    assert _csv_cells(_csv_export(app, rows))[1] == ['x,y', 'q"r', 'Résumé']
+
+
+def test_csv_response_takes_rows_from_a_generator(app: Flask) -> None:
+    rows = ([name] for name in ('Ada', 'Grace'))
+    assert _csv_cells(_csv_export(app, rows)) == [['Note'], ['Ada'], ['Grace']]
 
 
 # -- admin_required -----------------------------------------------------------

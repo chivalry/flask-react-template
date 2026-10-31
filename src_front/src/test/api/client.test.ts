@@ -88,6 +88,29 @@ describe('surfaceApiError', () => {
         await expect(surfaceApiError(error)).rejects.toBe(error)
         expect(error.message).toBe('Network Error')
     })
+
+    it('reads the error text from a blob body, as a download receives it', async () => {
+        const error = {
+            message: 'Request failed with status code 403',
+            response: { data: new Blob(['{"error":"Admin access required."}']) },
+        } as AxiosError<Blob>
+
+        await expect(surfaceApiError(error)).rejects.toBe(error)
+        expect(error.message).toBe('Admin access required.')
+    })
+
+    it.each(['<html>Bad gateway</html>', 'null', '{}', '{"error":42}'])(
+        'leaves the message alone when a blob body holds %s',
+        async (text) => {
+            const error = {
+                message: 'Request failed with status code 502',
+                response: { data: new Blob([text]) },
+            } as AxiosError<Blob>
+
+            await expect(surfaceApiError(error)).rejects.toBe(error)
+            expect(error.message).toBe('Request failed with status code 502')
+        },
+    )
 })
 
 describe('response interceptors', () => {
@@ -116,6 +139,17 @@ describe('response interceptors', () => {
         await expect(
             client.get('/v1/things', {
                 adapter: respondWith(401, { error: 'Session expired.' }),
+            }),
+        ).rejects.toThrow('Session expired.')
+
+        expect(handler).toHaveBeenCalledTimes(1)
+    })
+
+    it('read a blob error body and still report a lost session', async () => {
+        await expect(
+            client.get('/v1/things', {
+                responseType: 'blob',
+                adapter: respondWith(401, new Blob(['{"error":"Session expired."}'])),
             }),
         ).rejects.toThrow('Session expired.')
 

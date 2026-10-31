@@ -214,7 +214,7 @@ project/
 │   ├── jobs/          # Scheduled jobs; example.py is the one to copy
 │   ├── mailer.py      # Plain-text SMTP mail; off while SMTP_HOST is blank
 │   ├── models/        # Package: base.py has BaseMixin, user.py has Role and User
-│   ├── utils.py       # Error envelopes, pagination, parsing, upload checks
+│   ├── utils.py       # Error envelopes, pagination, parsing, upload checks, CSV
 │   ├── api/           # Blueprints (health, auth, users, audit logs)
 │   ├── schemas/       # Marshmallow schemas; base.py has BaseSchema
 │   ├── services/      # Business logic; base.py has the generic CRUD services
@@ -222,7 +222,7 @@ project/
 │   └── tests/         # pytest suite
 ├── src_front/         # React application
 │   └── src/
-│       ├── api/       # Axios client, the resource() factory, typed API modules
+│       ├── api/       # Axios client, resource(), downloadFile(), typed API modules
 │       ├── components/  Shell, route guards, error boundaries, layout/, common/, admin/
 │       ├── hooks/     # TanStack Query hooks per resource, shared hooks
 │       ├── pages/     # Home, Login, Register, Admin

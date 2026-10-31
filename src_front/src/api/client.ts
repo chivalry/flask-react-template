@@ -6,8 +6,8 @@
  * `X-Requested-With: XMLHttpRequest`, which the backend requires on any request that
  * changes data: a form on another site cannot set it, so a forged request fails.
  * Two response interceptors run on every failure: one copies the backend's `{ error }`
- * text into `error.message`, the other reports a lost session to whoever registered
- * through {@link setUnauthorizedHandler}.
+ * text into `error.message`, from a blob body too, the other reports a lost session to
+ * whoever registered through {@link setUnauthorizedHandler}.
  */
 
 import axios, { type AxiosError } from 'axios'
@@ -50,13 +50,37 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): voi
 }
 
 /**
+ * Read the body of a failed response, which a blob request receives as a blob.
+ *
+ * A blob that is not JSON, such as a proxy's HTML error page, counts as no body.
+ *
+ * @param data - The response body, if there was one.
+ * @returns The parsed body, or undefined when there is none to read.
+ */
+async function readErrorBody(
+    data?: ApiErrorBody | Blob,
+): Promise<ApiErrorBody | undefined> {
+    if (!(data instanceof Blob)) {
+        return data
+    }
+    try {
+        return JSON.parse(await data.text()) as ApiErrorBody
+    } catch {
+        return undefined
+    }
+}
+
+/**
  * Promote the backend's `{ error }` text to `error.message` so forms can show it.
  *
  * @param error - The rejection axios produced for a failed request.
  * @returns A promise rejected with the same error.
  */
-export function surfaceApiError(error: AxiosError<ApiErrorBody>): Promise<never> {
-    const message = error.response?.data?.error
+export async function surfaceApiError(
+    error: AxiosError<ApiErrorBody | Blob>,
+): Promise<never> {
+    const body = await readErrorBody(error.response?.data)
+    const message = body?.error
     if (typeof message === 'string') {
         error.message = message
     }
