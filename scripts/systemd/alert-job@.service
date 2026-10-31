@@ -1,0 +1,12 @@
+# Rendered by scripts/deploy.sh; installed as <APP_NAME>-alert-job@.service and started
+# by OnFailure= in job@.service, as <APP_NAME>-alert-job@<job>.service, when a run fails
+# or times out.
+[Unit]
+Description=Report a failed __APP_NAME__ job %i
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_DIR__
+ExecStart=/bin/bash __REPO_DIR__/scripts/alert.sh \
+  "__APP_NAME__: job %i FAILED" \
+  "The job %i failed on %H. Inspect: journalctl -u __APP_NAME__-job@%i.service -n 50"

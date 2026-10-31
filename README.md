@@ -211,6 +211,7 @@ project/
 │   ├── app.py         # Application factory, error handlers, SPA and uploads
 │   ├── auth.py        # current_user typed as User
 │   ├── extensions.py  # db (SQLAlchemy 2 Base), migrate, login_manager
+│   ├── jobs/          # Scheduled jobs; example.py is the one to copy
 │   ├── mailer.py      # Plain-text SMTP mail; off while SMTP_HOST is blank
 │   ├── models/        # Package: base.py has BaseMixin, user.py has Role and User
 │   ├── utils.py       # Error envelopes, pagination, parsing, upload checks
@@ -231,7 +232,7 @@ project/
 │       ├── utils/     # Local-day dates, record counts, account labels
 │       └── test/      # Vitest suite mirroring src/; utils/ has shared helpers
 ├── migrations/        # Alembic migrations (initial schema included)
-├── docker/            # Dockerfiles, entrypoint, nginx, production override
+├── docker/            # Dockerfiles, entrypoint, job loop, nginx, production override
 ├── scripts/           # Ports, worktrees, provisioning, deploy, TLS, backups
 │   └── tests/         # Shell script tests (npm run test:scripts)
 ├── plans/             # Implementation plans
@@ -320,8 +321,9 @@ deploys `main`, and a plain clone checks out `staging`, the default branch. It t
 backs up the database before migrating, hands the uploads volume to the backend's
 unprivileged user, rebuilds the containers, installs the nginx site, and enables
 certificate monitoring, nightly backups kept on the server, and a weekly drill that
-restores the newest one. A staging deploy skips the backup, the renewal hook, and the
-timers. Once the `SPACES_*` variables are filled in, `bash scripts/install-backup.sh`
-adds off-site copies in a bucket. Failures alert through `ALERT_WEBHOOK_URL`;
-`ai/backups.md` and `ai/tls.md` cover restores, alerts, and renewals. `ai/staging.md`
-covers running staging beside production.
+restores the newest one. It also installs the scheduled-job units, which run a job from
+`src_back/jobs/` once its timer is enabled (`ai/project.md`). A staging deploy skips the
+backup, the renewal hook, and the timers. Once the `SPACES_*` variables are filled in,
+`bash scripts/install-backup.sh` adds off-site copies in a bucket. Failures alert
+through `ALERT_WEBHOOK_URL`; `ai/backups.md` and `ai/tls.md` cover restores, alerts,
+and renewals. `ai/staging.md` covers running staging beside production.

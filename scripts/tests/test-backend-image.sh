@@ -5,9 +5,11 @@
 # it cannot change it; all of the dev source belongs to the app user, as Compose's file
 # watch needs; a new, empty volume on the uploads directory is writable by the app
 # user; and one that already holds root's files is not, until the chown that
-# scripts/deploy.sh runs hands it over. It needs a running Docker daemon; without one
-# it exits 77, which scripts/tests/run-all.sh counts as a skip outside CI. It runs
-# under macOS's bash 3.2 and on Linux.
+# scripts/deploy.sh runs hands it over. It also checks that the image can run a
+# scheduled job as scripts/systemd/job@.service does, under timeout, and holds
+# docker/job-loop.sh. It needs a running Docker daemon; without one it exits 77, which
+# scripts/tests/run-all.sh counts as a skip outside CI. It runs under macOS's bash 3.2
+# and on Linux.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 docker info > /dev/null 2>&1 ||
@@ -53,11 +55,15 @@ for tag in production development; do
     fail "The $tag image does not run as uid 10001."
   [ "$(run_in "$tag" stat -c %U src_back/uploads)" = app ] ||
     fail "The app user does not own src_back/uploads in the $tag image."
-  # Both stacks start the backend with /bin/sh docker/entrypoint.sh.
-  run_in "$tag" sh -n docker/entrypoint.sh ||
-    fail "The app user cannot read docker/entrypoint.sh in the $tag image."
+  # Both stacks start the backend with /bin/sh docker/entrypoint.sh, and a loop service
+  # (ai/project.md, Scheduled Jobs) starts /bin/sh docker/job-loop.sh.
+  for script in docker/entrypoint.sh docker/job-loop.sh; do
+    run_in "$tag" sh -n "$script" ||
+      fail "The app user cannot read $script in the $tag image."
+  done
 done
-for path in src_back src_back/app.py migrations docker docker/entrypoint.sh; do
+for path in src_back src_back/app.py migrations docker docker/entrypoint.sh \
+  docker/job-loop.sh; do
   [ "$(run_in production stat -c %U "$path")" = root ] ||
     fail "root does not own $path in the production image."
 done
@@ -69,6 +75,11 @@ UNOWNED=$(run_in development find src_back migrations docker ! -user app) ||
   fail 'find failed in the development image.'
 [ -z "$UNOWNED" ] ||
   fail "The app user does not own these in the development image: $UNOWNED"
+
+# scripts/systemd/job@.service runs `timeout 1h python -u -m src_back.jobs.<job>` in
+# the backend container, so the image needs timeout and must import the jobs.
+run_in production timeout 60 python -c 'import src_back.jobs.example' ||
+  fail 'The production image cannot import a job under timeout.'
 
 # Docker gives a new, empty named volume the owner of the image directory it mounts on.
 docker volume create "$NEW_VOLUME" > /dev/null

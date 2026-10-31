@@ -22,6 +22,9 @@ RUN if [ -n "$DEVELOPMENT_PACKAGES" ]; then \
 COPY src_back/ ./src_back/
 COPY migrations/ ./migrations/
 COPY docker/entrypoint.sh docker/entrypoint.sh
+# A loop service runs a scheduled job on a host without systemd timers; nothing starts
+# one by default (ai/project.md, Scheduled Jobs).
+COPY docker/job-loop.sh docker/job-loop.sh
 
 # The uploads_data volume mounts here. Docker gives a new, empty volume this directory's
 # owner; scripts/deploy.sh hands over one that already holds files.

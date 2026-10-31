@@ -40,7 +40,9 @@ and installs no backup timer or restore drill, because staging's data is a dispo
 copy of production's, and `backup.sh` would push a staging dump through the host-wide
 rclone remote, under whatever `BACKUP_PREFIX` staging's `.env` holds. It installs
 neither the certbot renewal hook nor the certificate monitoring, because production's
-hook and units cover every certificate on the host, and `certbot.timer` renews both. Of
+hook and units cover every certificate on the host, and `certbot.timer` renews both. It
+installs no scheduled-job units either, so no job runs on a timer against the copied
+rows; try a job there by hand (`ai/project.md`, Scheduled Jobs), where mail is off. Of
 the host's shared state, a staging deploy changes only its own nginx site.
 
 One piece of shared state is touched even so. Both sites define the nginx `map` that

@@ -210,13 +210,13 @@ assert_sleeps() {
     { echo "Expected $1 sleeps of 2 seconds, found $found" >&2; exit 1; }
 }
 
-# assert_units_installed -> the eight units and the certbot drop-in are installed with
+# assert_units_installed -> the eleven units and the certbot drop-in are installed with
 # no placeholder left, and no installed file has a mode other than 644.
 assert_units_installed() {
   local unit file
   for unit in cert-check.service cert-check.timer alert-certbot.service \
     backup.service backup.timer restore-drill.service restore-drill.timer \
-    alert-restore-drill.service; do
+    alert-restore-drill.service job@.service job@.timer alert-job@.service; do
     file="$SYSTEMD_DIR/$APP-$unit"
     [ -f "$file" ] || { echo "Missing the installed unit $APP-$unit" >&2; exit 1; }
     refute_contains '__[A-Z_]+__' "$file"
@@ -232,11 +232,17 @@ assert_units_installed() {
   }
 }
 
+# unit_lines FILE -> FILE's lines with every backslash continuation joined to the line
+# it continues and runs of spaces squeezed, as systemd reads a unit.
+unit_lines() {
+  awk '{ if (sub(/\\$/, "")) printf "%s", $0; else print }' "$1" | tr -s ' '
+}
+
 # A redeploy, with both data volumes present, starts the database for a pre-migration
 # dump labelled with the commit read before the pull, hands the uploads volume to the
 # backend's user, then rebuilds, waits for the backend, installs the nginx site and the
-# renewal hook, and enables the three timers after one daemon-reload. Every call is
-# listed, in order, so a step that moved or went missing shows.
+# renewal hook, and enables the three timers, and no job's, after one daemon-reload.
+# Every call is listed, in order, so a step that moved or went missing shows.
 start_test_case
 add_data_volumes
 run_deploy
@@ -261,8 +267,8 @@ expect_calls \
   "systemctl enable --now $TIMERS"
 
 # What that run installed: every unit with its placeholders filled and mode 644, the
-# backup and drill units with the rendered paths, schedules, alert, and timeout, the
-# nginx site in place of the stock one, and an executable renewal hook.
+# backup, drill, and job units with the rendered paths, schedules, alerts, and
+# timeouts, the nginx site in place of the stock one, and an executable renewal hook.
 assert_units_installed
 assert_line "$SYSTEMD_DIR/$APP-backup.service" \
   "ExecStart=/bin/bash $TEST_DIR/repo/scripts/backup.sh"
@@ -277,6 +283,23 @@ assert_contains "$APP: restore drill FAILED" \
   "$SYSTEMD_DIR/$APP-alert-restore-drill.service"
 assert_contains "/var/log/$APP/restore-drill\.log" \
   "$SYSTEMD_DIR/$APP-alert-restore-drill.service"
+# The job template runs the job its instance names in the backend container, through
+# Compose as deploy.sh calls it, under an hour's timeout inside the container, from the
+# clone, as a oneshot whose start timeout bounds it, with an alert per job; its timer
+# runs daily after the backup, and enabling it links it into timers.target.
+unit_lines "$SYSTEMD_DIR/$APP-job@.service" > "$TEST_DIR/job-unit"
+assert_line "$TEST_DIR/job-unit" \
+  "ExecStart=/usr/bin/$COMPOSE exec -T backend timeout 1h python -u -m src_back.jobs.%i"
+assert_line "$TEST_DIR/job-unit" "WorkingDirectory=$TEST_DIR/repo"
+assert_line "$TEST_DIR/job-unit" 'Type=oneshot'
+assert_line "$TEST_DIR/job-unit" "OnFailure=$APP-alert-job@%i.service"
+assert_line "$TEST_DIR/job-unit" 'TimeoutStartSec=65min'
+assert_line "$SYSTEMD_DIR/$APP-job@.timer" 'OnCalendar=*-*-* 03:00:00 UTC'
+assert_line "$SYSTEMD_DIR/$APP-job@.timer" 'Persistent=true'
+assert_line "$SYSTEMD_DIR/$APP-job@.timer" 'WantedBy=timers.target'
+assert_contains "$APP: job %i FAILED" "$SYSTEMD_DIR/$APP-alert-job@.service"
+assert_contains "journalctl -u $APP-job@%i\.service" \
+  "$SYSTEMD_DIR/$APP-alert-job@.service"
 assert_contains 'example\.com' "$NGINX_DIR/sites-available/$APP"
 refute_contains '__[A-Z_]+__' "$NGINX_DIR/sites-available/$APP"
 # A production site carries no basic auth; the pattern skips comment lines, which

@@ -8,6 +8,8 @@ that every contributor and agent follows.
 
 - Backend: `src_back/` - Python/Flask
     - `api/` - Flask route handlers, one blueprint per domain
+    - `jobs/` - scheduled jobs, one module each, which `python -m src_back.jobs.<name>`
+      runs once; `example.py` is the one to copy (Scheduled Jobs, below)
     - `models/` - SQLAlchemy models, one module per domain; `base.py` holds
       `BaseMixin`, `user.py` holds `Role` and `User`, `audit_log.py` holds `AuditAction`
       and `AuditLog`, and `__init__.py` re-exports every model, so
@@ -45,13 +47,13 @@ that every contributor and agent follows.
       account descriptions
     - `test/` - Vitest tests mirroring `src/`; `test/utils/` holds the shared helpers
 - `ai/` - these instructions; `AGENTS.md` and `.claude/CLAUDE.md` point here
-- `docker/` - Dockerfiles, entrypoint, nginx config, production Compose override
+- `docker/` - Dockerfiles, entrypoint, job loop, nginx config, production Compose override
 - `migrations/` - Alembic migrations
 - `plans/` - implementation plans; authoritative while a feature is in progress
 - `scripts/` - local tooling (ports, worktrees) and server provisioning, deployment
-  (production and staging), TLS, and backup scripts; `scripts/tests/` holds the
-  shell-script tests and `run-all.sh`, which checks every script's syntax and then runs
-  them
+  (production and staging), TLS, and backup scripts; `scripts/systemd/` holds the units
+  and timers a production deploy installs, and `scripts/tests/` the shell-script tests
+  and `run-all.sh`, which checks every script's syntax and then runs them
 - `tools.md` - why each tool and library is in the repository
 
 ## Commands
@@ -158,6 +160,108 @@ too. A test that depends on an environment variable sets or clears it with
 `monkeypatch` first, as the `FLASK_ENV` and `CORS_ALLOWED_ORIGINS` tests in
 `src_back/tests/test_app.py` do; `conftest.py` clears `APP_ENVIRONMENT` and the `SMTP_*`
 variables for every test, so no test sends mail through a developer's account.
+
+## Scheduled Jobs
+
+A scheduled job is a module in `src_back/jobs/` that `python -m src_back.jobs.<name>`
+runs once. Its `main(app=None)` builds the app with `create_app()` unless a test passes
+one, does its work inside one application context, commits, prints one line saying
+what it did, and returns the exit status, which its `__main__` block raises as
+`SystemExit`. An exception exits 1 with its traceback. Print rather than log: the app
+installs no logging handler, so `logging` drops everything below a warning.
+`src_back/jobs/example.py`, which counts the active accounts and changes nothing, is the
+one to copy, and `src_back/tests/test_example_job.py` calls its `main()` with the `app`
+fixture.
+
+A job must be safe to run again: a timer catches up a run the server missed, anyone can
+start one by hand, and a run can fail partway. Record what is done in the data, such as
+a column stamped when a row is handled, and commit right after each outside effect, such
+as an email, so a failure later in the run neither repeats the effect nor loses the
+record of it. Keep times timezone-aware, as `datetime.now(UTC)` is.
+
+Run a job once:
+
+```bash
+docker compose exec -T backend python -m src_back.jobs.example  # in the dev stack
+.venv/bin/python -m src_back.jobs.example                       # locally, reading .env
+docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml --env-file .env \
+  exec -T backend python -m src_back.jobs.example               # a server, staging too
+systemctl start $APP_NAME-job@example.service                   # production's unit
+```
+
+A production deploy installs three templates from `scripts/systemd/`. An instance of
+`$APP_NAME-job@.service` runs the job it is named for in the running backend container,
+with the backend's environment:
+`docker compose ... exec -T backend timeout 1h python -u -m src_back.jobs.<name>`.
+`-u` keeps the output unbuffered, so the journal holds what a run printed even when
+`timeout` stops it. `$APP_NAME-job@.timer` starts it daily at 03:00 UTC, half an hour
+after the backup starts its dump, and catches up a run the server was off for.
+`$APP_NAME-alert-job@.service` reports a run that exits non-zero or outlasts its hour
+through `scripts/alert.sh`. The hour is enforced inside the container, because stopping
+`docker compose exec` leaves its process running there (moby/moby#9098); the unit's
+`TimeoutStartSec=` stops a docker CLI that hangs. A failed run is not retried; once the
+cause is fixed, start the service by hand. A catch-up run after a boot can start before
+the stack is up, fail, and alert once, as a catch-up backup can. A staging deploy
+installs none of these units (`ai/staging.md`).
+
+Nothing runs until a job's timer is enabled:
+
+```bash
+systemctl enable --now $APP_NAME-job@example.timer
+systemctl list-timers "$APP_NAME-*"             # the next run of each timer
+journalctl -u $APP_NAME-job@example.service     # what each run printed
+systemctl disable --now $APP_NAME-job@example.timer
+```
+
+An enabled timer stays enabled across deploys, but a rebuilt server starts with none,
+so a project that keeps a job adds its timer to the `systemctl enable --now` call in
+`scripts/deploy.sh` and to the calls `scripts/tests/test-deploy.sh` expects. A job that
+needs another schedule gets a timer of its own, `scripts/systemd/job@<name>.timer`: a
+copy of `job@.timer` with its own `OnCalendar=`, added to the deploy's unit list and to
+the units the test's `assert_units_installed` checks. systemd uses a unit file named for
+an instance in place of the template.
+
+### Why not Celery
+
+Two derived apps adopted Celery with Redis for one daily job each, and neither job ran
+reliably: neither worker imported the module that defines its task, and in one app beat
+kept its schedule inside the container, so every deploy restarted the 24-hour countdown.
+Nothing in either app enqueued work from a request. A timer needs no broker, worker, or
+beat container, keeps its schedule across deploys, and reports a failure through
+`scripts/alert.sh`, as the backups and the restore drill do. Celery and Redis come back
+when requests enqueue work to run in the background, or when the work needs more than
+one worker.
+
+### Jobs without host access
+
+A host that cannot run systemd timers, such as a container platform, runs a job in a
+service of its own. `docker/job-loop.sh <job> <HH:MM>` sleeps until the next HH:MM UTC,
+runs the job, retries a failed run every five minutes, and exits 1 after the third
+failure in a row, so the restart policy and the platform's monitoring see it. It reads
+the clock for every wait, so a restart keeps the schedule. The template starts no such
+service. To add one, anchor the backend's `environment:` in
+`docker/docker-compose.prod.yml` and add the service beside it:
+
+```text
+services:
+  backend:
+    environment: &backend-environment
+      DATABASE_URL: ${DATABASE_URL}
+      # ...the backend's other variables, unchanged
+  job-example:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    entrypoint: ['/bin/sh', 'docker/job-loop.sh', 'example', '03:00']
+    environment: *backend-environment
+    depends_on:
+      - backend
+```
+
+Run each job one way, through its timer or through a loop service, never both, or it
+runs twice a day. A loop service has no `scripts/alert.sh`, so its exit is the only
+signal; give it the uploads volume as well if the job touches stored files.
 
 ## Worktrees
 

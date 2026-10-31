@@ -1,0 +1,26 @@
+# Rendered by scripts/deploy.sh: __APP_NAME__ and __REPO_DIR__ come from the server's
+# .env and clone location; installed as <APP_NAME>-job@.service. An instance runs the
+# job it is named for: <APP_NAME>-job@example.service runs src_back/jobs/example.py in
+# the running backend container, with the backend's environment. Its timer,
+# <APP_NAME>-job@example.timer, starts it once enabled (ai/project.md, Scheduled Jobs).
+# A failed or timed-out run starts <APP_NAME>-alert-job@example.service, which reports
+# it through scripts/alert.sh.
+[Unit]
+Description=__APP_NAME__ scheduled job %i
+After=docker.service
+Requires=docker.service
+OnFailure=__APP_NAME__-alert-job@%i.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_DIR__
+# Stopping `docker compose exec` leaves its process running in the container
+# (moby/moby#9098), so timeout ends a run that outlasts an hour there, and the unit
+# fails. python -u writes the job's output unbuffered, so the journal keeps what a
+# stopped run printed. A oneshot unit has no start timeout by default, so
+# TimeoutStartSec= ends a docker CLI that hangs, which would otherwise keep the timer
+# from starting later runs.
+ExecStart=/usr/bin/docker compose -f docker-compose.yml \
+  -f docker/docker-compose.prod.yml --env-file .env \
+  exec -T backend timeout 1h python -u -m src_back.jobs.%i
+TimeoutStartSec=65min

@@ -1,0 +1,16 @@
+# Rendered by scripts/deploy.sh; installed as <APP_NAME>-job@.timer. Nothing runs until
+# an instance is enabled: systemctl enable --now <APP_NAME>-job@example.timer runs
+# <APP_NAME>-job@example.service daily. A job that needs another schedule gets a timer
+# file of its own, job@<job>.timer, which systemd uses in place of this template
+# (ai/project.md, Scheduled Jobs).
+[Unit]
+Description=Daily __APP_NAME__ scheduled job %i
+
+[Timer]
+# Half an hour after the 02:30 backup starts its dump, so a scheduled run's changes stay
+# out of that morning's backup. A catch-up after a boot that missed both runs beside it.
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
