@@ -17,8 +17,9 @@
 # report healthy (its entrypoint runs the migrations and the seed before gunicorn
 # starts), install the nginx site (behind basic auth when STAGING_HTPASSWD is set), the
 # certbot deploy hook, and the systemd units: certificate monitoring, the daily backup,
-# and the weekly restore drill. The pre-migration backup, the certbot renewal hook, and
-# the systemd units are production's alone.
+# the weekly restore drill, and the scheduled-job templates, which run nothing until a
+# job's timer is enabled. The pre-migration backup, the certbot renewal hook, and the
+# systemd units are production's alone.
 set -euo pipefail
 
 usage() {
@@ -244,7 +245,7 @@ systemctl reload-or-restart nginx
 # Production's cert-check covers every certificate on the host, and its certbot drop-in
 # fires on any failed renewal. Its renewal hook, one host-wide file, reloads nginx after
 # any renewal, staging's included, so a staging deploy must not replace it with the
-# staging branch's copy. Staging's data is not backed up.
+# staging branch's copy. Staging's data is not backed up, and its jobs run by hand.
 if [ "$APP_ENVIRONMENT" = production ]; then
   echo "==> Installing certbot renewal hook..."
   # certbot creates renewal-hooks/ on its first run, not at package install, so on a
@@ -253,20 +254,22 @@ if [ "$APP_ENVIRONMENT" = production ]; then
   install -m 0755 scripts/letsencrypt-deploy-hook.sh \
     /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 
-  # Host-wide certificate monitoring, the daily backup, and the weekly restore drill.
-  # The unit files carry __APP_NAME__ and __REPO_DIR__ placeholders so several apps on
-  # one host each get their own units; the certbot drop-in is named per app because
-  # systemd merges OnFailure= across drop-ins. The backup and drill units go in on
-  # every deploy, bucket or not: backup.sh keeps local copies until install-backup.sh
-  # adds the remote.
-  echo "==> Installing certificate monitoring, backups, and the restore drill..."
+  # Host-wide certificate monitoring, the daily backup, the weekly restore drill, and
+  # the scheduled-job templates. The unit files carry __APP_NAME__ and __REPO_DIR__
+  # placeholders so several apps on one host each get their own units; the certbot
+  # drop-in is named per app because systemd merges OnFailure= across drop-ins. The
+  # backup and drill units go in on every deploy, bucket or not: backup.sh keeps local
+  # copies until install-backup.sh adds the remote. The template enables no job's
+  # timer; a project that keeps a job adds its timer to the enable call below
+  # (ai/project.md, Scheduled Jobs).
+  echo "==> Installing certificate monitoring, backups, the restore drill, and jobs..."
   render_systemd_unit() {  # <template> <destination>
     sed -e "s|__APP_NAME__|$APP_NAME|g" -e "s|__REPO_DIR__|$REPO_DIR|g" "$1" > "$2"
     chmod 644 "$2"
   }
   for unit in cert-check.service cert-check.timer alert-certbot.service \
     backup.service backup.timer restore-drill.service restore-drill.timer \
-    alert-restore-drill.service; do
+    alert-restore-drill.service job@.service job@.timer alert-job@.service; do
     render_systemd_unit "scripts/systemd/$unit" "/etc/systemd/system/$APP_NAME-$unit"
   done
   mkdir -p /etc/systemd/system/certbot.service.d
@@ -276,7 +279,7 @@ if [ "$APP_ENVIRONMENT" = production ]; then
   systemctl enable --now "$APP_NAME-cert-check.timer" "$APP_NAME-backup.timer" \
     "$APP_NAME-restore-drill.timer"
 else
-  echo "==> $APP_ENVIRONMENT installs no renewal hook, backups, restore drill, or"
+  echo "==> $APP_ENVIRONMENT installs no renewal hook, backups, restore drill, jobs, or"
   echo "    certificate monitoring; production's cover this host's certificates."
 fi
 

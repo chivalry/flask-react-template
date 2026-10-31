@@ -22,9 +22,9 @@ only explains what each one is for.
   and `npm ci` installs exactly what `package-lock.json` records.
 - **TypeScript**: the frontend language, compiled by Vite and checked by `tsc -b` over
   three project references: the app, `vite.config.ts`, and the tests.
-- **Bash and POSIX sh**: the scripts. `docker/entrypoint.sh` and the local helpers
-  `up.sh`, `down.sh`, `docker-url.sh`, and `worktree-setup.sh` are POSIX sh; the server
-  and deployment scripts and the Claude Code hook are Bash.
+- **Bash and POSIX sh**: the scripts. `docker/entrypoint.sh`, `docker/job-loop.sh`, and
+  the local helpers `up.sh`, `down.sh`, `docker-url.sh`, and `worktree-setup.sh` are
+  POSIX sh; the server and deployment scripts and the Claude Code hook are Bash.
 - **PostgreSQL 16**: the database in development and production, from the
   `postgres:16` image. CI runs the backend tests against it as well.
 - **SQLite**: the in-memory database the backend tests use by default, so the suite
@@ -75,7 +75,7 @@ modules in the last entry, which come with Python.
 - **filetype**: sniffs the MIME type of an uploaded file from its first bytes, so
   `validate_image_file()` trusts the content rather than the extension.
 - **python-dotenv**: loads `.env` when `src_back/app.py` is imported, so the `flask`
-  command, the seed, and pytest read the same settings on the host;
+  command, the seed, the scheduled jobs, and pytest read the same settings on the host;
   `python -m src_back.mailer`, which never imports the app, loads it itself. In the
   containers Compose supplies the variables instead, and `.dockerignore` keeps `.env`
   out of the image.
@@ -259,7 +259,8 @@ The `devDependencies` in `package.json`.
   platform.
 - **`python:3.12-slim`**: the backend image base. It installs only `requirements.txt`,
   plus watchdog when the dev stack builds it, so the image carries no lint, type-check,
-  or test tools. It runs the app as the unprivileged `app` user, uid 10001.
+  or test tools. It runs the app as the unprivileged `app` user, uid 10001. Its
+  coreutils supply the `timeout` that ends a scheduled job's run after an hour.
 - **`node:22-slim`**: the development frontend image, which runs the Vite dev server,
   and the build stage of the production frontend image.
 - **`nginx:1.27-alpine`**: the production frontend image. `docker/nginx.conf` serves
@@ -300,7 +301,7 @@ The `devDependencies` in `package.json`.
 
 The server's packages come from `scripts/provision.sh` and `scripts/install-backup.sh`;
 `scripts/deploy.sh` installs the nginx site and, in production only, the renewal hook
-and the monitoring, backup, and restore-drill units.
+and the monitoring, backup, restore-drill, and scheduled-job units.
 
 - **Ubuntu**: the production server's operating system. `scripts/provision.sh`
   installs every package with apt.
@@ -317,11 +318,15 @@ and the monitoring, backup, and restore-drill units.
   reloads nginx after each renewal. See `ai/tls.md`.
 - **systemd**: the units and timers under `scripts/systemd/`: the nightly backup at
   02:30 UTC, the weekly restore drill on Sundays at 04:00 UTC, the daily certificate
-  expiry check at 05:00 UTC, and the units that `OnFailure=` starts to report a failed
-  certbot renewal and a failed or timed-out drill. A production deploy installs them
-  all, and `scripts/install-backup.sh` installs the backup and drill units too. The
-  scripts render their `__APP_NAME__` and `__REPO_DIR__` placeholders so several apps
-  can share a host.
+  expiry check at 05:00 UTC, the scheduled-job templates, which run a job from
+  `src_back/jobs/` daily at 03:00 UTC once its timer is enabled, and the units that
+  `OnFailure=` starts to report a failed certbot renewal, a failed or timed-out drill,
+  and a failed or timed-out job. A production deploy installs them all, and
+  `scripts/install-backup.sh` installs the backup and drill units too. The scripts
+  render their `__APP_NAME__` and `__REPO_DIR__` placeholders so several apps can share
+  a host. The job timers stand in for Celery and Redis, which the template leaves out
+  until requests enqueue background work or the work needs more than one worker;
+  `ai/project.md` says why.
 - **rclone**: once a bucket is configured, pushes the backups to an S3-compatible
   bucket, DigitalOcean Spaces by default, with tiered daily, weekly, and monthly
   retention, and the restore drill fetches the newest dump and the uploads archive of
@@ -344,9 +349,9 @@ and the monitoring, backup, and restore-drill units.
 - **dig**: from `dnsutils`. It confirms the domain resolves to the server's address
   before certbot asks for a certificate.
 - **Webhooks (ntfy.sh, Slack, or Discord)**: where `scripts/alert.sh` sends failed
-  backups, failed restore drills, failed renewals, and expiring certificates.
-  `ALERT_WEBHOOK_FORMAT` picks the payload shape, and the server's `python3` escapes
-  the Slack and Discord JSON. With no URL set, alerts are only logged.
+  backups, failed restore drills, failed renewals, failed scheduled jobs, and expiring
+  certificates. `ALERT_WEBHOOK_FORMAT` picks the payload shape, and the server's
+  `python3` escapes the Slack and Discord JSON. With no URL set, alerts are only logged.
 - **git**: the server runs from a clone of the repository, and every deploy first
   checks that the clone is on `DEPLOY_BRANCH`, then pulls into it.
 - **Vim**: the editor for reviewing the generated `.env` on the server and filling in
