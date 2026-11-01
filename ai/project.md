@@ -76,6 +76,9 @@ for the reloader only when the dev stack builds it.
 - `npm run typecheck` - `tsc -b`
 - `npm run format` and `npm run format:py` - Prettier and Ruff format
 - `npm run fallow` - duplication and dead-code audit of the frontend
+- `npm run doctor` - check this worktree: exits 1 when `.venv/bin/python` does not run or
+  the project does not import, and warns about a venv based on a Homebrew Cellar path, a
+  missing `.vscode/settings.json`, and missing `node_modules`
 - `npm run docker:up` - build and start the dev stack, assigning free ports into `.env`,
   then watch it (`develop.watch` in `docker-compose.override.yml`) so saved edits reach
   the running containers. It stays attached, so an agent runs it as a background
@@ -272,3 +275,9 @@ ports, `.venv`, and `node_modules`; `/plan-issue` and `/plan-pr` create it throu
 `scripts/worktree-setup.sh`, which forks a new branch from `origin/staging`. Run every
 session inside a worktree, never in the container directory, which has no project
 settings, hooks, or scripts. Never check an issue branch out in `main/`.
+
+The script builds `.venv` with the first `python3` on `PATH` outside a virtualenv, or
+with `PYTHON_BIN`, which it refuses inside one, and stops if the venv cannot import
+`src_back.app`. It opens the finished worktree in VS Code when `code` is on `PATH`,
+unless `--no-open` comes before the branch. `npm run doctor` repeats the checks on an
+existing worktree.

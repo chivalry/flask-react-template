@@ -1,5 +1,5 @@
 #!/bin/sh
-# scripts/worktree-setup.sh <branch> [<port-offset>]
+# scripts/worktree-setup.sh [--no-open] <branch> [<port-offset>]
 #
 # Run from the bare-repo container directory (the one holding main/ and the other
 # worktrees). Creates a sibling worktree for <branch>, fully bootstrapped: .env,
@@ -10,14 +10,87 @@
 # worktrees can run the full Docker stack at once. Omit it to take the smallest
 # offset from 1 up that no sibling worktree's .env reserves and whose ports are all
 # free; main/ keeps offset 0.
+#
+# The first python3 on PATH outside a virtualenv builds .venv. PYTHON_BIN, a command or
+# a path, names another, which must be outside a virtualenv too.
+#
+# --no-open skips opening the finished worktree in VS Code, which otherwise happens when
+# code is on PATH.
 set -eu
+
+# usage -> say how to call this script and stop.
+usage() {
+  echo "usage: worktree-setup.sh [--no-open] <branch> [<port-offset>]" >&2
+  exit 1
+}
+
+open_editor=yes
+if [ "${1:-}" = --no-open ]; then
+  open_editor=no
+  shift
+fi
 
 branch="${1:-}"
 offset="${2:-}"
 
-if [ -z "$branch" ]; then
-  echo "usage: worktree-setup.sh <branch> [<port-offset>]" >&2
-  exit 1
+# --no-open anywhere else would pass as the branch or the offset. A bad offset would fail
+# in the arithmetic below, after the worktree exists, and a leading zero reads as octal.
+[ "$#" -le 2 ] || usage
+case "$branch" in '' | -*) usage ;; esac
+case "$offset" in *[!0-9]* | 0[0-9]*) usage ;; esac
+
+# virtualenv_state PYTHON -> True inside a virtualenv, False outside, nothing when PYTHON
+# does not run.
+virtualenv_state() {
+  "$1" -c 'import sys; print(sys.prefix != sys.base_prefix)' 2>/dev/null
+}
+
+# first_base_python -> the first python3 on PATH outside a virtualenv, or nothing. An
+# active virtualenv puts its own bin first, so plain python3 would be its interpreter. A
+# relative entry would stop resolving once the script moves into the worktree.
+first_base_python() {
+  (
+    IFS=:
+    for directory in $PATH; do
+      case "$directory" in /*) ;; *) continue ;; esac
+      if [ "$(virtualenv_state "$directory/python3")" = False ]; then
+        printf '%s\n' "$directory/python3"
+        exit 0
+      fi
+    done
+  )
+}
+
+# A venv built by another venv's python records that python's versioned Homebrew Cellar
+# directory as its base, and the next upgrade deletes it. Choose before anything is
+# created, so a refusal leaves no worktree or branch behind.
+if [ -n "${PYTHON_BIN:-}" ]; then
+  # Resolve it now: a relative path or PATH entry stops resolving once the script moves
+  # into the worktree. dash's command -v keeps such a path relative, and answers with the
+  # bare name for an empty PATH entry. A name it cannot find stays as given, for the
+  # refusal below.
+  if python_bin=$(command -v "$PYTHON_BIN"); then
+    case "$python_bin" in /*) ;; *) python_bin="$PWD/$python_bin" ;; esac
+  else
+    python_bin=$PYTHON_BIN
+  fi
+  case "$(virtualenv_state "$python_bin")" in
+    False) ;;
+    True)
+      echo "ERROR: PYTHON_BIN=$python_bin is inside a virtualenv; name a base python." >&2
+      exit 1
+      ;;
+    *)
+      echo "ERROR: PYTHON_BIN=$python_bin does not run." >&2
+      exit 1
+      ;;
+  esac
+else
+  python_bin=$(first_base_python)
+  if [ -z "$python_bin" ]; then
+    echo 'ERROR: no python3 on PATH outside a virtualenv; set PYTHON_BIN.' >&2
+    exit 1
+  fi
 fi
 
 # The container directory name doubles as the Compose project prefix.
@@ -104,9 +177,36 @@ set_env DATABASE_URL "postgresql://app:app@localhost:$db_port/app"
 # the relative .husky/_, so it resolves inside each worktree. Do NOT enable
 # extensions.worktreeConfig: with core.bare=true it makes git treat every worktree
 # as bare.
-python3 -m venv .venv
+echo "Building .venv with $python_bin"
+"$python_bin" -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
+
+# A venv that cannot import the project is broken now, so stop here rather than hand
+# back a worktree that fails later inside an editor.
+if ! .venv/bin/python -c 'import src_back.app'; then
+  echo "ERROR: .venv cannot import src_back.app, so $(pwd) is unfinished." >&2
+  exit 1
+fi
+
 npm install
+
+# home, not the interpreter's own path: every Homebrew python3 resolves into the Cellar
+# yet reports the stable opt path, and pyvenv.cfg's executable line names the Cellar on
+# a venv that survives upgrades.
+case "$(grep '^home' .venv/pyvenv.cfg)" in
+  */Cellar/*)
+    echo 'WARNING: .venv records a versioned Homebrew Cellar path as its base, which' >&2
+    echo 'the next upgrade deletes. Rebuild it with a PYTHON_BIN outside the Cellar.' >&2
+    ;;
+esac
+
+# Open the worktree itself, never the container directory: only a worktree has the
+# .vscode/settings.json that points the Python extension at its .venv. The worktree is
+# finished by now, so a code that fails costs only the window. The ready lines stay
+# last, because /plan-issue reads the ports from them.
+if [ "$open_editor" = no ] || ! command -v code >/dev/null 2>&1 || ! code "$PWD"; then
+  echo "Open this worktree with: code $PWD"
+fi
 
 echo "Worktree '$branch' ready at $(pwd)"
 echo "  COMPOSE_PROJECT_NAME=$repo-$slug"

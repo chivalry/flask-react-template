@@ -22,9 +22,10 @@ only explains what each one is for.
   and `npm ci` installs exactly what `package-lock.json` records.
 - **TypeScript**: the frontend language, compiled by Vite and checked by `tsc -b` over
   three project references: the app, `vite.config.ts`, and the tests.
-- **Bash and POSIX sh**: the scripts. `docker/entrypoint.sh`, `docker/job-loop.sh`, and
-  the local helpers `up.sh`, `down.sh`, `docker-url.sh`, and `worktree-setup.sh` are
-  POSIX sh; the server and deployment scripts and the Claude Code hook are Bash.
+- **Bash and POSIX sh**: the scripts. `docker/entrypoint.sh`, `docker/job-loop.sh`, the
+  dev container's `install-vscode-extensions.sh`, and the local helpers `up.sh`,
+  `down.sh`, `docker-url.sh`, `worktree-setup.sh`, and `worktree-doctor.sh` are POSIX sh;
+  the server and deployment scripts and the Claude Code hook are Bash.
 - **PostgreSQL 16**: the database in development and production, from the
   `postgres:16` image. CI runs the backend tests against it as well.
 - **SQLite**: the in-memory database the backend tests use by default, so the suite
@@ -381,9 +382,15 @@ and the monitoring, backup, restore-drill, and scheduled-job units.
   ShellCheck; fallow; npm Intellisense; Claude Code; and Open in GitHub. It marks the
   Jest and legacy Test Explorer extensions unwanted.
 - **Dev Containers**: `.devcontainer/devcontainer.json` starts from Microsoft's Python
-  3.12 dev container image, adds Node 22 and Docker-in-Docker, fills `.venv` from
+  3.12 dev container image, adds Node 22 and Docker-in-Docker, with `moby` off because
+  the image's Debian release has no Moby packages, fills `.venv` from
   `requirements-dev.txt`, installs `node_modules`, and forwards the Flask and Vite
   ports, so a fresh machine gets the whole toolchain.
+  `.devcontainer/install-vscode-extensions.sh` runs at every attach and installs the
+  recommendations in `.vscode/extensions.json` through the container's VS Code server,
+  once per change of that file, because VS Code installs the list in `devcontainer.json`
+  only when a container first starts. It skips the remote development extensions, which
+  run on the host.
 - **ShellCheck**: runs in the editor through its extension; two scripts carry
   `# shellcheck` directives where its warnings do not apply. CI does not run it; its
   shell-script job checks syntax with `bash -n` and `sh -n` and runs `scripts/tests/`.
@@ -394,4 +401,6 @@ and the monitoring, backup, restore-drill, and scheduled-job units.
   point agents at the canonical instructions under `ai/`.
 - **Git worktrees**: `scripts/worktree-setup.sh` supports a bare-repo layout with one
   worktree per branch, each with its own `.env`, Compose project, shifted ports,
-  `.venv`, and `node_modules`, so several branches can run side by side.
+  `.venv`, and `node_modules`, so several branches can run side by side. It builds each
+  `.venv` from a Python outside any virtualenv and checks that it imports the project;
+  `scripts/worktree-doctor.sh`, as `npm run doctor`, checks a worktree again later.

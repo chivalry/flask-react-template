@@ -21,6 +21,7 @@
     "test:scripts": "bash scripts/tests/run-all.sh",
     "test:watch": "vitest",
     "prepare": "husky",
+    "doctor": "sh scripts/worktree-doctor.sh",
     "docker:up": "sh scripts/up.sh",
     "docker:down": "sh scripts/down.sh",
     "docker:build": "docker compose build",
