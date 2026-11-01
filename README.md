@@ -159,12 +159,25 @@ sh main/scripts/worktree-setup.sh issue-12-some-slug
 (or `origin/main` where there is no `staging`), copies `.env` from `main/`, gives the
 stack its own `COMPOSE_PROJECT_NAME`, and shifts its ports by the smallest offset that
 no other worktree's `.env` reserves and nothing is listening on; a second argument sets
-the offset instead. It then installs the venv and `node_modules`, and `npm install`
-points the shared `core.hooksPath` at `.husky/_`, which resolves inside each worktree.
+the offset instead. It then builds the venv, checks that it imports the project, and
+installs `node_modules`, and `npm install` points the shared `core.hooksPath` at
+`.husky/_`, which resolves inside each worktree.
+
+The first `python3` on `PATH` outside a virtualenv builds the venv. `PYTHON_BIN`, a
+command or a path, names another, and the script refuses it if it sits inside a
+virtualenv: a venv built from another venv can record a versioned Homebrew Cellar
+directory as its base, which the next `brew upgrade` deletes. The script warns if the
+new venv recorded one anyway.
 
 Open each worktree in its own VS Code window, never the container directory: only a
 worktree has the `.vscode/settings.json` that points the Python extension at its
-`.venv`.
+`.venv`. The script opens the new worktree that way when `code` is on `PATH`, unless
+`--no-open` comes before the branch name.
+
+`npm run doctor`, run in a worktree, reports whether it still works. It exits 1 when
+`.venv/bin/python` does not run or the project does not import, and it warns about a
+venv based on a Cellar path, a missing `.vscode/settings.json`, and missing
+`node_modules`.
 
 Once a branch has merged, remove its stack, volumes, images, worktree, and local branch
 from the container directory:
@@ -193,6 +206,7 @@ git branch -D issue-12-some-slug
 | `npm run format`         | Prettier over the repository                    |
 | `npm run format:py`      | Ruff format                                     |
 | `npm run fallow`         | Duplication and dead-code audit                 |
+| `npm run doctor`         | Check this worktree's venv and `node_modules`   |
 | `npm run docker:up`      | Build, start, and watch the dev stack           |
 | `npm run docker:url`     | Print the running frontend's URL                |
 | `npm run docker:seed`    | Run the seed inside the backend container       |

@@ -5,7 +5,9 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "22"
     },
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": false
+    }
   },
   "customizations": {
     "vscode": {
@@ -57,5 +59,6 @@
       "onAutoForward": "openBrowser"
     }
   },
-  "postCreateCommand": "python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt && npm install"
+  "postCreateCommand": "python -m venv .venv && .venv/bin/pip install -r requirements-dev.txt && npm install",
+  "postAttachCommand": "sh .devcontainer/install-vscode-extensions.sh"
 }
