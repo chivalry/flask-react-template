@@ -65,8 +65,15 @@ first_base_python() {
 # directory as its base, and the next upgrade deletes it. Choose before anything is
 # created, so a refusal leaves no worktree or branch behind.
 if [ -n "${PYTHON_BIN:-}" ]; then
-  python_bin=$PYTHON_BIN
-  case "$python_bin" in [!/]*/*) python_bin="$PWD/$python_bin" ;; esac
+  # Resolve it now: a relative path or PATH entry stops resolving once the script moves
+  # into the worktree. dash's command -v keeps such a path relative, and answers with the
+  # bare name for an empty PATH entry. A name it cannot find stays as given, for the
+  # refusal below.
+  if python_bin=$(command -v "$PYTHON_BIN"); then
+    case "$python_bin" in /*) ;; *) python_bin="$PWD/$python_bin" ;; esac
+  else
+    python_bin=$PYTHON_BIN
+  fi
   case "$(virtualenv_state "$python_bin")" in
     False) ;;
     True)

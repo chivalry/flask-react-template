@@ -272,6 +272,10 @@ export PYTHON_BIN="$TEST_DIR/missing/python3"
 expect_refused "^ERROR: PYTHON_BIN=$PYTHON_BIN does not run" \
   container-a issue-4-refused 5
 assert_nothing_created container-a issue-4-refused
+export PYTHON_BIN=python3.99
+expect_refused '^ERROR: PYTHON_BIN=python3\.99 does not run' \
+  container-a issue-4-refused 5
+assert_nothing_created container-a issue-4-refused
 
 # A base PYTHON_BIN builds the venv in place of python3.
 export PYTHON_BIN="$TEST_DIR/elsewhere/python3.12"
@@ -279,8 +283,9 @@ run_worktree_setup container-a --no-open issue-5-python-bin 5
 assert_contains '^python3\.12 -m venv \.venv$' "$COMMANDS"
 refute_contains '^python3 ' "$COMMANDS"
 
-# A relative one still works once the script has moved into the worktree, and a bare
-# command stays a command. An empty one counts as unset.
+# A relative one still works once the script has moved into the worktree, and so does a
+# bare command, even through a relative PATH entry or an empty one, which means the
+# directory the script started in. An empty PYTHON_BIN counts as unset.
 export PYTHON_BIN=../elsewhere/python3.12
 run_worktree_setup container-a --no-open issue-5-relative-python-bin 12
 assert_contains '^python3\.12 -m venv \.venv$' "$COMMANDS"
@@ -288,6 +293,14 @@ export PYTHON_BIN=python3.12
 SETUP_PATH="$TEST_DIR/elsewhere:$PATH"
 run_worktree_setup container-a --no-open issue-5-command-python-bin 14
 assert_contains '^python3\.12 -m venv \.venv$' "$COMMANDS"
+SETUP_PATH="../elsewhere:$PATH"
+run_worktree_setup container-a --no-open issue-5-command-relative-entry 16
+assert_contains '^python3\.12 -m venv \.venv$' "$COMMANDS"
+ln -s "$TEST_DIR/bin/mock-command" "$TEST_DIR/container-a/python3.12"
+SETUP_PATH=":$PATH"
+run_worktree_setup container-a --no-open issue-5-command-empty-entry 17
+assert_contains '^python3\.12 -m venv \.venv$' "$COMMANDS"
+rm "$TEST_DIR/container-a/python3.12"
 unset SETUP_PATH
 export PYTHON_BIN=
 run_worktree_setup container-a --no-open issue-5-empty-python-bin 15

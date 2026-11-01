@@ -115,9 +115,14 @@ on purpose, so do not restore the original wording.
    script prints how to open it instead.
 9. **Bad input stops before `git`.** `--no-open` anywhere but first would otherwise pass
    as the branch or the offset. A non-numeric offset, or one like `08` that the shell
-   reads as octal, fails only in arithmetic after the worktree exists. A relative
-   `PYTHON_BIN` or `PATH` entry would stop resolving once the script moves into the
-   worktree, so the first is made absolute and the second is skipped.
+   reads as octal, fails only in arithmetic after the worktree exists. A relative path
+   or `PATH` entry would stop resolving once the script moves into the worktree, so
+   `PYTHON_BIN` is resolved with `command -v` and made absolute before anything checks
+   or uses it, and the search for a base `python3` skips relative entries. PR #55's
+   review found the bare-command case, which `command -v` alone does not settle: `dash`
+   answers relative to a relative entry and with the bare name for an empty one. A name
+   `command -v` cannot find stays as given, so the refusal quotes it and nothing looks
+   for it in the current directory.
 10. **The skills do not change.** `~/.ai/commands/plan-issue.md` and `plan-pr.md` get the
     new interpreter choice for free. They omit `--no-open`, so a new worktree opens in
     VS Code, which is where the implementation session runs, as ranch-tracker does today.
@@ -227,8 +232,15 @@ first_base_python() {
 # directory as its base, and the next upgrade deletes it. Choose before anything is
 # created, so a refusal leaves no worktree or branch behind.
 if [ -n "${PYTHON_BIN:-}" ]; then
-  python_bin=$PYTHON_BIN
-  case "$python_bin" in [!/]*/*) python_bin="$PWD/$python_bin" ;; esac
+  # Resolve it now: a relative path or PATH entry stops resolving once the script moves
+  # into the worktree. dash's command -v keeps such a path relative, and answers with the
+  # bare name for an empty PATH entry. A name it cannot find stays as given, for the
+  # refusal below.
+  if python_bin=$(command -v "$PYTHON_BIN"); then
+    case "$python_bin" in /*) ;; *) python_bin="$PWD/$python_bin" ;; esac
+  else
+    python_bin=$PYTHON_BIN
+  fi
   case "$(virtualenv_state "$python_bin")" in
     False) ;;
     True)
@@ -724,6 +736,10 @@ export PYTHON_BIN="$TEST_DIR/missing/python3"
 expect_refused "^ERROR: PYTHON_BIN=$PYTHON_BIN does not run" \
   container-a issue-4-refused 5
 assert_nothing_created container-a issue-4-refused
+export PYTHON_BIN=python3.99
+expect_refused '^ERROR: PYTHON_BIN=python3\.99 does not run' \
+  container-a issue-4-refused 5
+assert_nothing_created container-a issue-4-refused
 
 # A base PYTHON_BIN builds the venv in place of python3.
 export PYTHON_BIN="$TEST_DIR/elsewhere/python3.12"
@@ -731,8 +747,9 @@ run_worktree_setup container-a --no-open issue-5-python-bin 5
 assert_contains '^python3\.12 -m venv \.venv$' "$COMMANDS"
 refute_contains '^python3 ' "$COMMANDS"
 
-# A relative one still works once the script has moved into the worktree, and a bare
-# command stays a command. An empty one counts as unset.
+# A relative one still works once the script has moved into the worktree, and so does a
+# bare command, even through a relative PATH entry or an empty one, which means the
+# directory the script started in. An empty PYTHON_BIN counts as unset.
 export PYTHON_BIN=../elsewhere/python3.12
 run_worktree_setup container-a --no-open issue-5-relative-python-bin 12
 assert_contains '^python3\.12 -m venv \.venv$' "$COMMANDS"
@@ -740,6 +757,14 @@ export PYTHON_BIN=python3.12
 SETUP_PATH="$TEST_DIR/elsewhere:$PATH"
 run_worktree_setup container-a --no-open issue-5-command-python-bin 14
 assert_contains '^python3\.12 -m venv \.venv$' "$COMMANDS"
+SETUP_PATH="../elsewhere:$PATH"
+run_worktree_setup container-a --no-open issue-5-command-relative-entry 16
+assert_contains '^python3\.12 -m venv \.venv$' "$COMMANDS"
+ln -s "$TEST_DIR/bin/mock-command" "$TEST_DIR/container-a/python3.12"
+SETUP_PATH=":$PATH"
+run_worktree_setup container-a --no-open issue-5-command-empty-entry 17
+assert_contains '^python3\.12 -m venv \.venv$' "$COMMANDS"
+rm "$TEST_DIR/container-a/python3.12"
 unset SETUP_PATH
 export PYTHON_BIN=
 run_worktree_setup container-a --no-open issue-5-empty-python-bin 15
@@ -1302,6 +1327,9 @@ Group A mutations of `worktree-setup.sh`:
 20. Delete the relative-entry `case` from `first_base_python`.
 21. Move the argument checks below `git fetch`.
 22. Print the open hint after the ready lines.
+23. Skip `command -v`, so a bare `PYTHON_BIN` stays bare.
+24. Make only an answer holding a slash absolute, which only `dash` shows.
+25. Make a name `command -v` cannot find absolute as well.
 
 Group B mutations of `worktree-doctor.sh` and `package.json`:
 
