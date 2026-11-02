@@ -5,12 +5,14 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { register } from '../../api/auth'
+import { listProviders } from '../../api/oauth'
 import Register from '../../pages/Register'
 import { useAuthStore } from '../../store/auth'
 import type { AuthUser } from '../../types/auth'
-import { plainUser } from '../utils/fixtures'
+import { googleProvider, plainUser } from '../utils/fixtures'
 
 vi.mock('../../api/auth')
+vi.mock('../../api/oauth')
 
 const renderRegister = () =>
     render(
@@ -35,6 +37,7 @@ describe('Register', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         useAuthStore.setState({ user: null, isLoading: false })
+        vi.mocked(listProviders).mockReturnValue(new Promise(() => undefined))
     })
 
     it('shows the invalid email message and does not call the API', async () => {
@@ -145,6 +148,29 @@ describe('Register', () => {
         expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
             'href',
             '/login',
+        )
+    })
+
+    it('offers each enabled provider, returning to the home page', async () => {
+        vi.mocked(listProviders).mockResolvedValue([googleProvider])
+        renderRegister()
+
+        expect(
+            await screen.findByRole('link', { name: 'Continue with Google' }),
+        ).toHaveAttribute('href', '/api/v1/auth/oauth/google/start?next=%2F')
+    })
+
+    it('hints the email and a new password to the browser', () => {
+        renderRegister()
+
+        expect(screen.getByLabelText('Email')).toHaveAttribute('autocomplete', 'email')
+        expect(screen.getByLabelText('Password')).toHaveAttribute(
+            'autocomplete',
+            'new-password',
+        )
+        expect(screen.getByLabelText('Confirm password')).toHaveAttribute(
+            'autocomplete',
+            'new-password',
         )
     })
 })

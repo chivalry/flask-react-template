@@ -17,6 +17,24 @@ export interface AuthUser {
     updated_at: string
 }
 
+/** A sign-in provider the server has enabled. */
+export interface OAuthProviderInfo {
+    name: string
+    label: string
+}
+
+/** A provider identity linked to the signed-in account. */
+export interface LinkedAccount {
+    id: number
+    uuid: string
+    provider: string
+    /** The address the provider gave, which may differ from the account's. */
+    email: string | null
+    display_name: string | null
+    created_at: string
+    updated_at: string
+}
+
 /**
  * Tell whether a role grants administrative access.
  *

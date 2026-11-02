@@ -21,6 +21,7 @@ from werkzeug.exceptions import NotFound
 
 from src_back.extensions import db, login_manager, migrate
 from src_back.models import User
+from src_back.services.oauth_providers import build_registry
 from src_back.utils import ErrorResponse, forbidden
 
 load_dotenv()
@@ -37,6 +38,9 @@ _PLACEHOLDER_SECRET_KEYS = frozenset(
 _JSON_PATH_PREFIXES = ('/api', '/uploads')
 
 _MUTATING_METHODS = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
+
+_CROSS_SITE_POST_ENDPOINTS = frozenset({'oauth.callback'})
+"""Routes that check their own signed state, because a provider posts to them."""
 
 _JSON_ERROR_MESSAGES = {
     400: 'Bad request',
@@ -96,6 +100,7 @@ def create_app(config_overrides: dict[str, Any] | None = None) -> Flask:
         app.config.update(config_overrides)
     _guard_secret_key(app)
     _resolve_public_base_url(app)
+    _configure_oauth_providers(app)
     _initialize_extensions(app)
     _register_blueprints(app)
     app.before_request(_require_requested_with_header)
@@ -204,6 +209,20 @@ def _resolve_public_base_url(app: Flask) -> None:
     app.config['PUBLIC_BASE_URL'] = public_base_url or None
 
 
+def _configure_oauth_providers(app: Flask) -> None:
+    """Enable each sign-in provider whose keys the environment holds.
+
+    It runs after the overrides and :func:`_resolve_public_base_url`, because the registry
+    needs the settled origin, and ``setdefault`` keeps a registry a test injects.
+
+    Args:
+        app: The application being configured.
+    """
+    app.config.setdefault(
+        'OAUTH_PROVIDERS', build_registry(os.environ, app.config['PUBLIC_BASE_URL'])
+    )
+
+
 def _is_development_or_testing(app: Flask) -> bool:
     """Report whether development defaults and placeholder secrets are allowed.
 
@@ -242,10 +261,11 @@ def _register_blueprints(app: Flask) -> None:
     Args:
         app: The application being configured.
     """
-    from src_back.api import audit_logs_bp, auth_bp, health_bp, users_bp
+    from src_back.api import audit_logs_bp, auth_bp, health_bp, oauth_bp, users_bp
 
     app.register_blueprint(health_bp, url_prefix='/api')
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
+    app.register_blueprint(oauth_bp, url_prefix='/api/v1/auth/oauth')
     app.register_blueprint(users_bp, url_prefix='/api/v1/users')
     app.register_blueprint(audit_logs_bp, url_prefix='/api/v1/audit-logs')
 
@@ -322,6 +342,7 @@ def _require_requested_with_header() -> ErrorResponse | None:
     session cookie: a form on another site cannot set the header, and a script on
     another origin cannot send it without a CORS preflight that only the allowed
     origins pass. ``ai/conventions.md`` explains when a route may be exempted.
+    Routes in ``_CROSS_SITE_POST_ENDPOINTS`` are exempt.
 
     Returns:
         A 403 JSON error envelope for a POST, PUT, PATCH, or DELETE to an ``/api``
@@ -331,6 +352,7 @@ def _require_requested_with_header() -> ErrorResponse | None:
     if (
         request.method in _MUTATING_METHODS
         and _is_json_path(request.path)
+        and request.endpoint not in _CROSS_SITE_POST_ENDPOINTS
         and request.headers.get('X-Requested-With') != 'XMLHttpRequest'
     ):
         return forbidden('Missing the X-Requested-With header.')

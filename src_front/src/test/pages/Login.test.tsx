@@ -1,16 +1,18 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { AxiosResponse } from 'axios'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { login } from '../../api/auth'
+import { listProviders } from '../../api/oauth'
 import Login from '../../pages/Login'
 import { useAuthStore } from '../../store/auth'
 import type { AuthUser } from '../../types/auth'
-import { adminUser } from '../utils/fixtures'
+import { adminUser, googleProvider } from '../utils/fixtures'
 
 vi.mock('../../api/auth')
+vi.mock('../../api/oauth')
 
 // Shows the full location it landed on, so a test can check the query and hash too.
 const RequestedPage = () => {
@@ -18,9 +20,9 @@ const RequestedPage = () => {
     return <div>{`Requested page ${pathname}${search}${hash}`}</div>
 }
 
-const renderLogin = (state?: unknown) =>
+const renderLogin = (state?: unknown, search = '') =>
     render(
-        <MemoryRouter initialEntries={[{ pathname: '/login', state }]}>
+        <MemoryRouter initialEntries={[{ pathname: '/login', search, state }]}>
             <Routes>
                 <Route path="/login" element={<Login />} />
                 <Route path="/" element={<div>Home page</div>} />
@@ -50,6 +52,7 @@ describe('Login', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         useAuthStore.setState({ user: null, isLoading: false })
+        vi.mocked(listProviders).mockReturnValue(new Promise(() => undefined))
     })
 
     it('shows the invalid email message and does not call the API', async () => {
@@ -158,6 +161,79 @@ describe('Login', () => {
         expect(screen.getByRole('link', { name: 'Register' })).toHaveAttribute(
             'href',
             '/register',
+        )
+    })
+
+    it('shows the message a failed provider sign-in redirects with', () => {
+        renderLogin(undefined, '?error=link_required')
+
+        expect(screen.getByRole('alert')).toHaveTextContent(
+            'That email already has an account. Sign in, then link it from Account.',
+        )
+    })
+
+    it('replaces that message with a failed password attempt, in one alert', async () => {
+        const user = userEvent.setup()
+        vi.mocked(login).mockRejectedValue(new Error('Invalid email or password.'))
+        renderLogin(undefined, '?error=link_required')
+
+        await signInWith(user, 'user@example.com', 'wrong-password')
+
+        await waitFor(() =>
+            expect(screen.getByRole('alert')).toHaveTextContent(
+                'Invalid email or password.',
+            ),
+        )
+        expect(screen.getAllByRole('alert')).toHaveLength(1)
+    })
+
+    it('sends a provider sign-in back to the page the guard recorded', async () => {
+        vi.mocked(listProviders).mockResolvedValue([googleProvider])
+        renderLogin({
+            from: { pathname: '/widgets/12', search: '?tab=notes', hash: '#latest' },
+        })
+
+        expect(
+            await screen.findByRole('link', { name: 'Continue with Google' }),
+        ).toHaveAttribute(
+            'href',
+            '/api/v1/auth/oauth/google/start?next=%2Fwidgets%2F12%3Ftab%3Dnotes%23latest',
+        )
+    })
+
+    it('places the provider buttons below Sign in and above the footer', async () => {
+        vi.mocked(listProviders).mockResolvedValue([googleProvider])
+        renderLogin()
+
+        const provider = await screen.findByRole('link', { name: 'Continue with Google' })
+        const submit = screen.getByRole('button', { name: 'Sign in' })
+        const footer = screen.getByRole('link', { name: 'Register' })
+        expect(submit.compareDocumentPosition(provider)).toBe(
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        )
+        expect(provider.compareDocumentPosition(footer)).toBe(
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        )
+    })
+
+    it('shows no provider button and no divider when none is enabled', async () => {
+        vi.mocked(listProviders).mockResolvedValue([])
+        renderLogin()
+
+        await waitFor(() => expect(listProviders).toHaveBeenCalledTimes(1))
+        expect(
+            screen.queryByRole('link', { name: /^Continue with/ }),
+        ).not.toBeInTheDocument()
+        expect(screen.queryByRole('separator')).not.toBeInTheDocument()
+    })
+
+    it('hints the email and the current password to the browser', () => {
+        renderLogin()
+
+        expect(screen.getByLabelText('Email')).toHaveAttribute('autocomplete', 'email')
+        expect(screen.getByLabelText('Password')).toHaveAttribute(
+            'autocomplete',
+            'current-password',
         )
     })
 })

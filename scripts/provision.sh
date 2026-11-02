@@ -121,6 +121,12 @@ SMTP_USERNAME=
 SMTP_PASSWORD=
 SMTP_FROM=
 
+# --- Sign-in providers (ai/auth.md) ---------------------------------------------
+# Google appears on the sign-in pages once both keys are set. Register
+# https://$DOMAIN/api/v1/auth/oauth/google/callback with the Google client.
+OAUTH_GOOGLE_CLIENT_ID=
+OAUTH_GOOGLE_CLIENT_SECRET=
+
 # --- Loopback ports published by Compose; host nginx proxies to them -------------
 BACKEND_PORT=5000
 FRONTEND_HOST_PORT=8080
@@ -156,6 +162,7 @@ ENV
   echo "    Fill in CERTBOT_EMAIL, ALERT_WEBHOOK_URL, and SPACES_* before running the"
   echo "    steps that use them."
   echo "    Mail stays off until SMTP_HOST and the other SMTP_* values are filled in."
+  echo "    Google sign-in stays off until OAUTH_GOOGLE_* are filled in."
   echo "    Fill in ADMIN_EMAIL before the first deploy; that admin signs in with the"
   echo "    generated ADMIN_PASSWORD."
 fi

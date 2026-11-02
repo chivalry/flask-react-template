@@ -11,6 +11,10 @@ Flask-Login==0.6.3
 marshmallow==3.26.2
 marshmallow-sqlalchemy==1.5.0
 filetype==1.2.0
+# Sign-in providers. Not Authlib: its Flask client keeps state in the session, which
+# the provider's redirect cannot read under SameSite=Strict (ai/auth.md).
+requests==2.34.2
+joserfc==1.7.7
 psycopg2-binary==2.9.10
 python-dotenv==1.2.4
 gunicorn==23.0.0

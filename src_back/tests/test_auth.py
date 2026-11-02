@@ -15,11 +15,14 @@ from src_back.models import AuditAction, AuditLog, Role, User
 from src_back.models import user as user_model
 from src_back.services import auth as auth_service
 from src_back.services.auth import (
+    LAST_METHOD,
     complete_login,
     count_sign_in_methods,
     find_user_by_email,
+    require_another_sign_in_method,
 )
-from src_back.services.errors import InactiveAccountError
+from src_back.services.errors import InactiveAccountError, LastSignInMethodError
+from src_back.services.oauth_state import SECURE_COOKIE_NAME
 
 SESSION_LIFETIME = timedelta(days=SESSION_LIFETIME_DAYS)
 
@@ -331,6 +334,20 @@ def test_logout_deletes_the_session_cookie(auth_client: FlaskClient) -> None:
     assert auth_client.get('/api/v1/auth/me').status_code == 401
 
 
+def test_logout_clears_the_transaction_cookie(auth_client: FlaskClient) -> None:
+    r = auth_client.post('/api/v1/auth/logout')
+    assert r.status_code == 200
+    header = next(
+        header
+        for header in r.headers.getlist('Set-Cookie')
+        if header.startswith(f'{SECURE_COOKIE_NAME}=')
+    )
+    attributes = header.split('; ')[1:]
+    assert 'Max-Age=0' in attributes
+    assert 'Path=/' in attributes
+    assert 'Secure' in attributes
+
+
 def test_logout_unauthenticated(client: FlaskClient) -> None:
     r = client.post('/api/v1/auth/logout')
     assert r.status_code == 401
@@ -379,3 +396,16 @@ def test_count_sign_in_methods_is_zero_without_a_password(
     passwordless_user: User,
 ) -> None:
     assert count_sign_in_methods(passwordless_user) == 0
+
+
+def test_count_sign_in_methods_counts_each_linked_provider(linked_user: User) -> None:
+    assert count_sign_in_methods(linked_user) == 1
+    linked_user.set_password('password123')
+    assert count_sign_in_methods(linked_user) == 2
+
+
+def test_require_another_sign_in_method(linked_user: User) -> None:
+    with pytest.raises(LastSignInMethodError, match=LAST_METHOD):
+        require_another_sign_in_method(linked_user)
+    linked_user.set_password('password123')
+    require_another_sign_in_method(linked_user)

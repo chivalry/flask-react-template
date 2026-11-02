@@ -8,6 +8,7 @@ from marshmallow import Schema, ValidationError
 from src_back.models import Role, User
 from src_back.models.user import normalize_email
 from src_back.schemas.base import BaseSchema, UTCDateTime, validate_ids_exist
+from src_back.schemas.oauth import oauth_account_schema, oauth_provider_schema
 from src_back.schemas.user import (
     login_schema,
     registration_schema,
@@ -144,6 +145,29 @@ def test_utc_datetime_gives_every_value_an_explicit_utc_offset() -> None:
     assert field.serialize('at', {'at': naive}) == '2026-10-14T16:05:00+00:00'
     assert field.serialize('at', {'at': pacific}) == '2026-10-14T16:05:00+00:00'
     assert field.serialize('at', {'at': None}) is None
+
+
+def test_oauth_account_schema_hides_the_provider_subject(linked_user: User) -> None:
+    data = cast(dict[str, Any], oauth_account_schema.dump(linked_user.oauth_accounts[0]))
+    assert set(data) == {
+        'id',
+        'uuid',
+        'provider',
+        'email',
+        'display_name',
+        'created_at',
+        'updated_at',
+    }
+    assert data['provider'] == 'google'
+    assert data['email'] == linked_user.email
+    assert data['created_at'].endswith('+00:00')
+
+
+def test_oauth_provider_schema_dumps_name_and_label(app: Flask) -> None:
+    provider = app.config['OAUTH_PROVIDERS']['google']
+    data = cast(dict[str, Any], oauth_provider_schema.dump(provider))
+    assert set(data) == {'name', 'label'}
+    assert data == {'name': 'google', 'label': 'Google'}
 
 
 def test_user_repr_names_the_email(app: Flask) -> None:

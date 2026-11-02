@@ -1,5 +1,6 @@
 /** @file App shell: top navigation bar around the routed page content. */
 
+import AccountCircleIcon from '@mui/icons-material/AccountCircle'
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings'
 import HomeIcon from '@mui/icons-material/Home'
 import LogoutIcon from '@mui/icons-material/Logout'
@@ -24,6 +25,7 @@ interface NavLinkItem {
 /** Every page reachable from the navigation bar, in display order. */
 const NAV_LINKS: NavLinkItem[] = [
     { to: '/', label: 'Home', icon: <HomeIcon /> },
+    { to: '/account', label: 'Account', icon: <AccountCircleIcon /> },
     {
         to: '/admin',
         label: 'Admin',

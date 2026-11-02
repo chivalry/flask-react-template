@@ -3,8 +3,8 @@
 ## Overview
 
 Accounts sign in with an email and a password through `src_back/api/auth.py` and
-`src_back/services/auth.py`. Sign-in providers (#29, #30, #31) and passkeys (#32) build
-on this groundwork:
+`src_back/services/auth.py`, or through a sign-in provider (below). #30, #31, and passkeys
+(#32) build on the same groundwork:
 
 - `User` stores every email through `normalize_email()` in `src_back/models/user.py`
   (trimmed and lowercased), however the account is created or edited, and
@@ -14,24 +14,164 @@ on this groundwork:
   `authenticate_user` answers such an account, and an unknown email, exactly as it
   answers a wrong password, down to the one password-hash check each costs.
 - `complete_login(user)` is the one place a sign-in starts. It refuses a deactivated
-  account with `InactiveAccountError`, which every caller answers with 403, and
-  otherwise makes the session permanent. Callers check the credential first, so only
-  someone who proved it learns that the account is deactivated.
-- `count_sign_in_methods(user)` counts the ways an account can sign in. Code that
-  removes one raises `LastSignInMethodError` (409) instead of removing the last.
+  account with `InactiveAccountError`, which the JSON routes answer with 403 and the
+  provider callback with `account_inactive`, and otherwise makes the session permanent.
+  Callers check the credential first, so only someone who proved it learns that the
+  account is deactivated.
+- `count_sign_in_methods(user)` counts the ways an account can sign in. Code that removes
+  one calls `require_another_sign_in_method(user)` first, which raises
+  `LastSignInMethodError` (409) instead of removing the last.
 - Self-registration loads `RegistrationSchema`, which accepts only an email and a
   password: `role` or `is_active` in the body answers 422, so nobody registers as an
   admin. A registered account is an active `user`.
 - Every POST under `/api` must carry `X-Requested-With: XMLHttpRequest`
-  (`ai/conventions.md`). Sign in with Apple's `form_post` callback (#30) arrives as a
-  cross-site POST without it, so #30 must exempt that route and check its `state`
-  instead.
+  (`ai/conventions.md`). A provider's callback may arrive as a cross-site POST without it,
+  as Sign in with Apple's `form_post` will (#30), so `oauth.callback` is exempt and checks
+  its signed `state` instead.
 
-An account without a password is trusted to own its email address, because only a
-sign-in provider that verified the address creates one. Any new way to create such an
-account, such as an invitation or a passkey-first sign-up, must verify the address
-first; otherwise linking a provider by email would hand the account to whoever
-created it.
+An account without a password is trusted to own its email address as far as the sign-in
+provider that created it verified the address, and "The linking policy" says how far that
+goes. Any new way to create such an account, such as an invitation or a passkey-first
+sign-up, must verify the address first; otherwise linking a provider by email would hand
+the account to whoever created it.
+
+## Sign-in providers
+
+A `Continue with <provider>` button runs the OAuth 2.0 and OpenID Connect
+authorization-code flow on the backend. No token reaches the browser and none is stored.
+A provider is enabled when its keys are set and `PUBLIC_BASE_URL` is known; with none
+enabled, `/providers` answers `[]` and the sign-in pages show only the password form.
+Google is the first provider. A new one is one `OAuthProvider` and one identity function
+in `src_back/services/oauth_providers.py`.
+
+### The flow
+
+1. Login and Register render one link per enabled provider to
+   `GET /api/v1/auth/oauth/<provider>/start?next=/path`. It is a full-page navigation, so
+   this route and `callback` answer with redirects, never the JSON envelope.
+2. `start` reads the session only when asked. `?link=1` on a same-origin navigation by a
+   signed-in visitor, which is what the Account page's link sends, is linking, and `next`
+   defaults to `/account`. Any other `?link=1` is refused with `invalid_state`, not run as
+   a sign-in, which would leave the identity on a second account nothing can move it
+   from. The refusal lands on the Account page, or on the sign-in page when no session
+   remains, as when an Account tab outlives a sign-out elsewhere. Without `?link=1`,
+   anyone is signing in, even with a live session, which `complete_login` replaces, and
+   `next` defaults to `/`. It stores a transaction in the cookie below and redirects to
+   the provider with `state`, `nonce`, and a PKCE challenge.
+3. The provider sends the browser back to `callback`, by GET, or by POST for Sign in with
+   Apple (#30). The callback trusts only the cookie: it compares `state`, exchanges the
+   code, checks the ID token, resolves the account, and calls `complete_login`.
+4. It clears the cookie and redirects to `PUBLIC_BASE_URL + next`. A failure redirects to
+   `/login?error=<code>`, or `/account?error=<code>` when linking, and the page shows the
+   message `src_front/src/utils/oauth.ts` holds for that code.
+
+| Code               | Meaning                                                       |
+| ------------------ | ------------------------------------------------------------- |
+| `unknown_provider` | No enabled provider has that name                             |
+| `cancelled`        | The person declined at the provider                           |
+| `invalid_state`    | The answer or link request does not belong to this browser    |
+| `expired`          | The transaction's cookie is gone or more than ten minutes old |
+| `exchange_failed`  | The provider refused the code or could not be reached         |
+| `invalid_token`    | The ID token, or the keys to check it, failed validation      |
+| `email_required`   | The provider gave no email                                    |
+| `email_unverified` | The provider has not verified the email                       |
+| `link_required`    | The email belongs to an account with a password               |
+| `already_linked`   | The identity, or the account's slot for it, is already taken  |
+| `account_inactive` | The account has been deactivated or no longer exists          |
+
+A failed token exchange or key fetch logs a warning; a wrong client secret shows up there
+and nowhere else.
+
+### The transaction cookie
+
+Production's session cookie is `SameSite=Strict`, and browsers never send such a cookie on
+a navigation another site started, which is what the provider's redirect is. There is no
+Redis, and gunicorn's workers share no memory. So `src_back/services/oauth_state.py` keeps
+the transaction in a cookie of its own: signed with `SECRET_KEY`, `HttpOnly`, and good for
+ten minutes. It holds nothing the browser's owner should not see. The callback's response
+stores the session cookie. The browser may leave it off the redirect that follows, which
+is harmless, because the SPA's `/me` call is same-site.
+
+Over https the cookie is `__Host-oauth_txn`, with `SameSite=None; Secure` and `Path=/`.
+`SameSite=None` lets a cross-site POST carry it. The signature proves this server issued a
+transaction, not that it issued it to this browser, so the prefix does the rest: browsers
+refuse such a cookie from a sibling host or plain http, which stops anyone planting their
+own signed transaction and linking a victim's identity to their account. The session
+cookie has no such prefix, so a sibling host can still sign a visitor in as someone else.
+Over http the cookie is `oauth_txn`, `SameSite=Lax`, under `/api/v1/auth/oauth`, which a
+GET callback still carries.
+
+A callback that proved it belongs to the transaction clears the cookie, whatever the
+outcome. One that did not leaves it, because any site can send a browser to the callback,
+and that must not end a sign-in in progress. So two `start` requests in one browser
+overwrite the cookie, the first callback fails with `invalid_state`, and the second
+succeeds. Logging out clears the cookie too, so a link started before a sign-out cannot
+finish after it.
+
+The callback's GET is not throttled, because nginx counts only POSTs. One valid cookie can
+replay it for ten minutes, and each replay holds a sync worker for a round trip to the
+provider. A `limit_req` for it needs a location per provider, which is its own issue.
+
+### The linking policy
+
+`resolve_user()` in `src_back/services/oauth.py` fails closed:
+
+1. A link matches the provider and its subject: sign in that account. While linking, one
+   held by another account is `already_linked`. The subject decides, never the email: an
+   address can change hands.
+2. While linking: attach to the account that started the transaction, whatever the email
+   says. An account has one link per provider, so a second is `already_linked`.
+3. No email is `email_required`, and an unverified one is `email_unverified`.
+4. A verified email with no account creates one, with no password and the `user` role.
+5. A verified email on an account without a password attaches and signs in: that account's
+   email was itself asserted by a provider that verified it.
+6. A verified email on an account with a password is `link_required`. Registration never
+   verifies an address, so auto-linking would let anyone who registered the victim's
+   address keep a working password to the merged account. Sign in with the password, then
+   link from the Account page. A project that verifies addresses at registration can set
+   `AUTO_LINK_PASSWORD_ACCOUNTS`.
+
+Rules 4 and 5 take the provider's word. Google warns that `email_verified` records a past
+check: for an address outside `@gmail.com` and Google Workspace, "ownership of the third
+party email account may have since changed", and it recommends another challenge
+([Google](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token)).
+So rule 4 can create an account for a stale address, and the real owner's registration
+then answers 409, which is no worse than anyone registering that address today. Rule 5
+cannot fire while Google is the only provider, because every account without a password
+already holds its Google link. Decide it when adding a second provider: dropping rule 5,
+so that every existing account answers `link_required`, needs nothing stored beforehand.
+
+Link mode needs that same-origin request as well as the session, so another site cannot
+start it, and a stale session cannot turn a sign-in into a link. Every link and unlink is
+audited in `oauth_accounts`, admin-only, and a link made in the callback has no actor in
+production, because the session does not reach it there. Unlinking the last way to sign in
+is a 409.
+
+Linking asks for no password or other fresh proof, and a link survives a password change.
+To clear a compromised account, deactivate it and read its links' history on the Audit
+tab. Filter by the `oauth_accounts` table rather than by user, because a link made in the
+production callback has no actor, and match each entry's `user_id` to the account. Then
+remove any link its owner does not recognize in a database shell before reactivating it:
+
+```sql
+DELETE FROM oauth_accounts WHERE user_id = <id> AND provider = '<provider>';
+```
+
+### Setting up Google
+
+1. In the Google Cloud console, create an OAuth client of type Web application.
+2. Add one authorized redirect URI per environment:
+   `PUBLIC_BASE_URL + /api/v1/auth/oauth/google/callback`. The match is exact, including
+   the port, and `scripts/worktree-setup.sh` moves the dev port per worktree, so register
+   each one in use; any other shows `redirect_uri_mismatch` on Google's page.
+3. `openid email profile` are non-sensitive scopes, so no app verification is needed.
+   Publish the consent screen out of Testing, or only its test users can sign in. Showing
+   the app's name and logo there takes Google's lighter
+   [brand verification](https://support.google.com/cloud/answer/9110914).
+4. Set `OAUTH_GOOGLE_CLIENT_ID` and `OAUTH_GOOGLE_CLIENT_SECRET` in the `.env`. Compose
+   hands a container its values only when it creates one, so run `npm run deploy` on a
+   server after changing them. A server provisioned before this has no such lines, which
+   leaves Google off.
 
 ## Sign-in throttling
 
@@ -66,7 +206,8 @@ An admin deactivates an account instead of deleting it. On its next request its 
 ends: `load_user` in `src_back/app.py` loads a deactivated account as nobody, and
 Flask-Login's `UserMixin.is_authenticated` follows `is_active` as well, so
 `@login_required` and `admin_required` answer 401 either way. A fresh login answers 403
-`Account is inactive.` after the password check.
+`Account is inactive.` after the password check, and a provider sign-in lands on
+`/login?error=account_inactive`.
 
 - A new account must be committed, or given `is_active=True`, before `complete_login`:
   the column default applies only at INSERT, so an unsaved `User` reads `is_active` as

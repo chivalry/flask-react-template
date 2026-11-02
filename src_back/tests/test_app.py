@@ -9,7 +9,7 @@ from marshmallow import ValidationError
 
 from src_back.app import MAX_UPLOAD_MB, create_app, load_user, unauthorized_handler
 from src_back.models import User
-from src_back.tests.conftest import PNG_BYTES
+from src_back.tests.conftest import OAUTH_ENVIRONMENT, PNG_BYTES
 
 
 def test_unrouted_api_path_returns_json_not_found_error(client: FlaskClient) -> None:
@@ -144,6 +144,22 @@ def test_mutating_request_without_requested_with_header_is_forbidden(
 ) -> None:
     client.environ_base.pop('HTTP_X_REQUESTED_WITH')
     response = client.open(path, method=method, json={})
+    assert response.status_code == 403
+    assert response.get_json() == {'error': 'Missing the X-Requested-With header.'}
+
+
+def test_the_provider_callback_needs_no_requested_with_header(
+    client: FlaskClient,
+) -> None:
+    client.environ_base.pop('HTTP_X_REQUESTED_WITH')
+    response = client.post('/api/v1/auth/oauth/google/callback')
+    # Not the header check's 403: the callback answers with its own redirect.
+    assert response.status_code == 302
+
+
+def test_the_linked_account_routes_still_need_the_header(client: FlaskClient) -> None:
+    client.environ_base.pop('HTTP_X_REQUESTED_WITH')
+    response = client.delete('/api/v1/auth/oauth/accounts/google')
     assert response.status_code == 403
     assert response.get_json() == {'error': 'Missing the X-Requested-With header.'}
 
@@ -354,6 +370,49 @@ def test_public_base_url_override_wins_over_the_environment(
         }
     )
     assert app.config['PUBLIC_BASE_URL'] == 'https://app.test'
+
+
+def test_the_environment_enables_a_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Without .env's origin, the registry must wait for the testing default.
+    monkeypatch.delenv('PUBLIC_BASE_URL', raising=False)
+    for name, value in OAUTH_ENVIRONMENT.items():
+        monkeypatch.setenv(name, value)
+    app = create_app({'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
+    assert list(app.config['OAUTH_PROVIDERS']) == ['google']
+
+
+def test_no_provider_is_enabled_without_keys() -> None:
+    app = create_app({'TESTING': True, 'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:'})
+    assert app.config['OAUTH_PROVIDERS'] == {}
+
+
+def test_no_provider_is_enabled_without_a_public_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name, value in OAUTH_ENVIRONMENT.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv('FLASK_ENV', 'production')
+    monkeypatch.setenv('SECRET_KEY', 'a-long-random-secret')
+    monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
+    monkeypatch.delenv('PUBLIC_BASE_URL', raising=False)
+    app = create_app()
+    assert app.config['PUBLIC_BASE_URL'] is None
+    assert app.config['OAUTH_PROVIDERS'] == {}
+
+
+def test_an_injected_registry_wins_over_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name, value in OAUTH_ENVIRONMENT.items():
+        monkeypatch.setenv(name, value)
+    app = create_app(
+        {
+            'TESTING': True,
+            'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+            'OAUTH_PROVIDERS': {},
+        }
+    )
+    assert app.config['OAUTH_PROVIDERS'] == {}
 
 
 @pytest.mark.parametrize(

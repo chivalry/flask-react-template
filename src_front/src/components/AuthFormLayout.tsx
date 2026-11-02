@@ -10,6 +10,7 @@ interface AuthTextFieldProps {
     label: string
     type: string
     error?: string
+    autoComplete?: string
 }
 
 /**
@@ -20,14 +21,22 @@ interface AuthTextFieldProps {
  * @param props.label - The field's visible label.
  * @param props.type - The underlying input type.
  * @param props.error - Validation message to show, or undefined when valid.
+ * @param props.autoComplete - The browser's autofill hint, if any.
  * @returns The text field element.
  */
-export function AuthTextField({ registration, label, type, error }: AuthTextFieldProps) {
+export function AuthTextField({
+    registration,
+    label,
+    type,
+    error,
+    autoComplete,
+}: AuthTextFieldProps) {
     return (
         <TextField
             {...registration}
             label={label}
             type={type}
+            autoComplete={autoComplete}
             fullWidth
             margin="normal"
             error={Boolean(error)}
@@ -43,6 +52,7 @@ interface AuthFormLayoutProps {
     apiError: string | null
     isSubmitting: boolean
     submitLabel: string
+    secondary?: ReactNode
     footer: ReactNode
     onSubmit: FormEventHandler<HTMLFormElement>
 }
@@ -56,6 +66,7 @@ interface AuthFormLayoutProps {
  * @param props.apiError - Server error to display, or null.
  * @param props.isSubmitting - Whether a submit is in flight.
  * @param props.submitLabel - Text for the submit button.
+ * @param props.secondary - Other ways to sign in, shown beneath the submit button.
  * @param props.footer - Link text shown beneath the submit button.
  * @param props.onSubmit - The form's submit handler.
  * @returns The auth page element.
@@ -66,6 +77,7 @@ export default function AuthFormLayout({
     apiError,
     isSubmitting,
     submitLabel,
+    secondary,
     footer,
     onSubmit,
 }: AuthFormLayoutProps) {
@@ -90,6 +102,7 @@ export default function AuthFormLayout({
                 >
                     {submitLabel}
                 </Button>
+                {secondary}
                 <Typography variant="body2" sx={{ mt: 2 }}>
                     {footer}
                 </Typography>

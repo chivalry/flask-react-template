@@ -84,6 +84,14 @@ modules in the last entry, which come with Python.
   migrations and the seed whenever `FLASK_ENV` is not `development`, with
   `GUNICORN_WORKERS` workers: 2 by default, 4 in the production override. The dev stack
   and work without Docker use Flask's development server.
+- **requests**: the HTTP client for a provider sign-in's two server-side calls, the token
+  exchange in `src_back/services/oauth.py` and the key fetch in `oidc.py`, each with a
+  timeout.
+- **joserfc**: validates a provider's ID token, signature and claims, in
+  `src_back/services/oidc.py`. It brings `cryptography`, and Sign in with Apple's ES256
+  client secret will need it too (#30). Authlib, which uses it, is not installed: its
+  Flask client keeps state in the session, which the provider's redirect cannot read under
+  a `SameSite=Strict` cookie.
 - **watchdog**: not in `requirements.txt`; the dev stack's build installs it into the
   backend image through the `DEVELOPMENT_PACKAGES` build argument. Flask's reloader uses
   it when present and then notices modules being added and deleted, which its fallback
@@ -115,6 +123,8 @@ except pip-audit, which only CI and a manual run use.
   `conftest.py` build the app on an in-memory database and sign in test clients.
 - **pytest-cov**: measures coverage with coverage.py and fails the run under 100%, the
   gate `pyproject.toml` sets with `--cov-fail-under=100`.
+- **responses**: replaces the `requests` transport in tests, so the token exchange and the
+  key fetch run for real against canned answers (`mocked_http` in `conftest.py`).
 - **pip-audit**: checks the packages in `requirements.txt`, and those they pull in,
   against PyPI's vulnerability data. CI's backend job fails on any known vulnerability;
   run it locally with `.venv/bin/pip-audit -r requirements.txt`.

@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom'
 import { z } from 'zod'
 
 import { register as registerUser } from '../api/auth'
+import ProviderButtons from '../components/auth/ProviderButtons'
 import AuthFormLayout, { AuthTextField } from '../components/AuthFormLayout'
 import { useAuthFormState } from '../hooks/useAuthFormState'
 
@@ -45,18 +46,21 @@ function RegisterFields({ register, errors }: RegisterFieldsProps) {
                 registration={register('email')}
                 label="Email"
                 type="email"
+                autoComplete="email"
                 error={errors.email?.message}
             />
             <AuthTextField
                 registration={register('password')}
                 label="Password"
                 type="password"
+                autoComplete="new-password"
                 error={errors.password?.message}
             />
             <AuthTextField
                 registration={register('confirmPassword')}
                 label="Confirm password"
                 type="password"
+                autoComplete="new-password"
                 error={errors.confirmPassword?.message}
             />
         </>
@@ -69,7 +73,7 @@ function RegisterFields({ register, errors }: RegisterFieldsProps) {
  * @returns The registration page element.
  */
 export default function Register() {
-    const { apiError, handleAuthAction } = useAuthFormState()
+    const { apiError, handleAuthAction, returnPath } = useAuthFormState()
 
     const {
         register,
@@ -95,6 +99,7 @@ export default function Register() {
             apiError={apiError}
             isSubmitting={isSubmitting}
             submitLabel={isSubmitting ? 'Creating account…' : 'Create account'}
+            secondary={<ProviderButtons next={returnPath} />}
             footer={
                 <>
                     Already have an account? <Link to="/login">Sign in</Link>

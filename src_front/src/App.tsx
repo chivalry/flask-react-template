@@ -11,6 +11,7 @@ import RouteErrorBoundary from './components/RouteErrorBoundary'
 import { useSessionQueryCache } from './hooks/useSessionQueryCache'
 import { useAuthStore } from './store/auth'
 
+const Account = lazy(() => import('./pages/Account'))
 const AdminPage = lazy(() => import('./pages/AdminPage'))
 const Home = lazy(() => import('./pages/Home'))
 const Login = lazy(() => import('./pages/Login'))
@@ -56,6 +57,7 @@ export default function App() {
                         <Route element={<AppShell />}>
                             <Route element={<RouteErrorBoundary />}>
                                 <Route index element={<Home />} />
+                                <Route path="/account" element={<Account />} />
                                 <Route element={<AdminRoute />}>
                                     <Route path="/admin/*" element={<AdminPage />} />
                                 </Route>

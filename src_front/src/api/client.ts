@@ -90,15 +90,18 @@ export async function surfaceApiError(
 /**
  * Run the registered handler when a request was refused for want of a session.
  *
- * A 401 from the auth endpoints themselves is skipped: a wrong password is a
- * form error, not a lost session.
+ * A 401 from the auth endpoints themselves is skipped: a wrong password is a form
+ * error, not a lost session. The linked accounts under `/v1/auth/oauth/` are ordinary
+ * signed-in requests, so their 401 counts.
  *
  * @param error - The rejection axios produced for a failed request.
  * @returns A promise rejected with the same error.
  */
 function reportLostSession(error: AxiosError): Promise<never> {
     const url = error.config?.url
-    if (error.response?.status === 401 && !url?.startsWith('/v1/auth/')) {
+    const isAuthEndpoint =
+        url?.startsWith('/v1/auth/') && !url.startsWith('/v1/auth/oauth/')
+    if (error.response?.status === 401 && !isAuthEndpoint) {
         unauthorizedHandler?.()
     }
     return Promise.reject(error)

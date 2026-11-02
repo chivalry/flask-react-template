@@ -12,15 +12,17 @@ that every contributor and agent follows.
       runs once; `example.py` is the one to copy (Scheduled Jobs, below)
     - `models/` - SQLAlchemy models, one module per domain; `base.py` holds
       `BaseMixin`, `user.py` holds `Role` and `User`, `audit_log.py` holds `AuditAction`
-      and `AuditLog`, and `__init__.py` re-exports every model, so
-      `from src_back.models import User` works and every table registers
+      and `AuditLog`, `oauth_account.py` holds `OAuthAccount`, and `__init__.py`
+      re-exports every model, so `from src_back.models import User` works and every
+      table registers
     - `schemas/` - Marshmallow schemas; `schemas/base.py` holds `BaseSchema` and
       `validate_ids_exist()`
     - `services/` - business logic by domain; `services/base.py` holds the generic
       `CRUDService`, `ChildRecordService`, and `require_unique_name()`,
       `services/errors.py` the exceptions services raise, `services/audit_log.py` the
-      audit trail and the history queries, and `services/users.py` the admin's account
-      management
+      audit trail and the history queries, `services/oauth.py`, `oauth_providers.py`,
+      `oauth_state.py`, and `oidc.py` sign-in through a provider, and `services/users.py`
+      the admin's account management
     - `tests/` - pytest; one `test_<module>.py` per module; `helpers.py` holds
       `persist()`
     - `app.py` - application factory, error handlers, SPA and upload serving
@@ -37,8 +39,9 @@ that every contributor and agent follows.
     - `components/` - React components; `components/layout/` holds `AppShell.tsx`, the
       shell, and the master-detail layout (`MasterDetailLayout`, `ListPaneHeader`,
       `ChildPortal`); `components/common/` holds the form, record-list, and detail
-      kit; and `components/admin/` the admin screens and `UsersMasterDetail`, the
-      example an admin sees on Home
+      kit; `components/auth/` the provider buttons, and `components/account/` the
+      Account page's sections; and `components/admin/` the admin screens and
+      `UsersMasterDetail`, the example an admin sees on Home
     - `hooks/` - shared hooks, including the TanStack Query hooks for each resource
     - `pages/` - top-level page components
     - `schemas/` - Zod form schemas, their defaults, and their payload mappers
@@ -159,11 +162,18 @@ docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml --env-fil
   exec -T backend python -m src_back.mailer you@example.com   # on a server
 ```
 
+Sign-in providers are off until their keys are set: `build_registry()` in
+`src_back/services/oauth_providers.py` enables Google when `OAUTH_GOOGLE_CLIENT_ID` and
+`OAUTH_GOOGLE_CLIENT_SECRET` are both set and `PUBLIC_BASE_URL` is known. A server
+provisioned before these keys has no such lines, which leaves Google off. `ai/auth.md` has
+the setup steps.
+
 `src_back/app.py` calls `load_dotenv()` at import, so `.env` values are visible to pytest
 too. A test that depends on an environment variable sets or clears it with
 `monkeypatch` first, as the `FLASK_ENV` and `CORS_ALLOWED_ORIGINS` tests in
-`src_back/tests/test_app.py` do; `conftest.py` clears `APP_ENVIRONMENT` and the `SMTP_*`
-variables for every test, so no test sends mail through a developer's account.
+`src_back/tests/test_app.py` do; `conftest.py` clears `APP_ENVIRONMENT`, the `SMTP_*`
+variables, and the `OAUTH_GOOGLE_*` keys for every test, so no test sends mail or
+reaches a provider through a developer's account.
 
 ## Scheduled Jobs
 

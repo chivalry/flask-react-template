@@ -10,7 +10,11 @@ from src_back.extensions import db
 from src_back.models import Role, User
 from src_back.models.user import normalize_email
 from src_back.services.audit_log import AuditTrail
-from src_back.services.errors import DuplicateRecordError, InactiveAccountError
+from src_back.services.errors import (
+    DuplicateRecordError,
+    InactiveAccountError,
+    LastSignInMethodError,
+)
 
 # Checked in place of a stored hash when there is none, so an unknown email and an
 # account without a password cost the same hash computation as a wrong password. It
@@ -19,12 +23,15 @@ from src_back.services.errors import DuplicateRecordError, InactiveAccountError
 _DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(32))
 
 # Every place that creates or changes an account audits it through this trail:
-# registration here, the admin's Users screen (services/users.py), and the seed. Only
-# admins may read account histories, which carry every account's email and role. No
-# password or hash is recorded; services/users.py logs a change as MASKED_VALUE.
+# registration here, a provider sign-in (services/oauth.py), the admin's Users screen
+# (services/users.py), and the seed. Only admins may read account histories, which
+# carry every account's email and role. No password or hash is recorded;
+# services/users.py logs a change as MASKED_VALUE.
 USER_AUDIT_TRAIL = AuditTrail(
     User, ('email', 'role', 'is_active'), label_field='email', admin_only=True
 )
+
+LAST_METHOD = 'Add another way to sign in before removing this one.'
 
 
 def find_user_by_email(email: str) -> User | None:
@@ -94,8 +101,8 @@ def authenticate_user(email: str, password: str) -> User | None:
 def complete_login(user: User) -> None:
     """Start the session of a user whose identity has been verified.
 
-    Every sign-in ends here, whatever proved the identity: registration and password
-    login now, a provider callback or a passkey later. Each of them therefore inherits
+    Every sign-in ends here, whatever proved the identity: registration, password
+    login, and a provider callback now, a passkey later. Each of them therefore inherits
     the refusal of a deactivated account. Without it, Flask-Login's ``login_user``
     would return ``False`` without signing anyone in, and the route would still
     answer 200. Callers verify the credential first, so the refusal reaches only
@@ -118,10 +125,8 @@ def complete_login(user: User) -> None:
 def count_sign_in_methods(user: User) -> int:
     """Count the ways an account can sign in.
 
-    Code that removes a sign-in method checks this first and raises
-    :class:`~src_back.services.errors.LastSignInMethodError` instead of removing the
-    last one. Only a password counts so far; linked providers and passkeys join the
-    count when their tables arrive.
+    A password and each linked provider count; passkeys join the count when their table
+    arrives.
 
     Args:
         user: The account to inspect.
@@ -129,4 +134,19 @@ def count_sign_in_methods(user: User) -> int:
     Returns:
         The number of sign-in methods the account has.
     """
-    return 1 if user.has_password else 0
+    return (1 if user.has_password else 0) + len(user.oauth_accounts)
+
+
+def require_another_sign_in_method(user: User) -> None:
+    """Refuse to remove a sign-in method that is the account's last.
+
+    Code that removes one calls this first.
+
+    Args:
+        user: The account about to lose a method.
+
+    Raises:
+        LastSignInMethodError: If the account has no other way to sign in.
+    """
+    if count_sign_in_methods(user) <= 1:
+        raise LastSignInMethodError(LAST_METHOD)

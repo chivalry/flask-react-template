@@ -229,7 +229,7 @@ project/
 │   ├── mailer.py      # Plain-text SMTP mail; off while SMTP_HOST is blank
 │   ├── models/        # Package: base.py has BaseMixin, user.py has Role and User
 │   ├── utils.py       # Error envelopes, pagination, parsing, upload checks, CSV
-│   ├── api/           # Blueprints (health, auth, users, audit logs)
+│   ├── api/           # Blueprints (health, auth, OAuth, users, audit logs)
 │   ├── schemas/       # Marshmallow schemas; base.py has BaseSchema
 │   ├── services/      # Business logic; base.py has the generic CRUD services
 │   ├── seed.py        # Idempotent seed; creates the first admin
@@ -237,9 +237,10 @@ project/
 ├── src_front/         # React application
 │   └── src/
 │       ├── api/       # Axios client, resource(), downloadFile(), typed API modules
-│       ├── components/  Shell, route guards, error boundaries, layout/, common/, admin/
+│       ├── components/  Shell, route guards, error boundaries, layout/, common/,
+│       │                admin/, account/, auth/
 │       ├── hooks/     # TanStack Query hooks per resource, shared hooks
-│       ├── pages/     # Home, Login, Register, Admin
+│       ├── pages/     # Home, Login, Register, Account, Admin
 │       ├── schemas/   # Zod form schemas and payload mappers
 │       ├── store/     # Zustand auth store
 │       ├── types/     # AuthUser, User, PaginatedResponse
