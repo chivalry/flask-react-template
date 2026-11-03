@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import { z } from 'zod'
 
 import { login } from '../api/auth'
+import ProviderButtons from '../components/auth/ProviderButtons'
 import AuthFormLayout, { AuthTextField } from '../components/AuthFormLayout'
 import { useAuthFormState } from '../hooks/useAuthFormState'
 
@@ -26,7 +27,7 @@ type FormData = z.infer<typeof schema>
  * @returns The sign-in page element.
  */
 export default function Login() {
-    const { apiError, handleAuthAction } = useAuthFormState()
+    const { apiError, handleAuthAction, returnPath } = useAuthFormState()
 
     const {
         register,
@@ -49,6 +50,7 @@ export default function Login() {
             apiError={apiError}
             isSubmitting={isSubmitting}
             submitLabel={isSubmitting ? 'Signing in…' : 'Sign in'}
+            secondary={<ProviderButtons next={returnPath} />}
             footer={
                 <>
                     No account? <Link to="/register">Register</Link>
@@ -60,12 +62,14 @@ export default function Login() {
                 registration={register('email')}
                 label="Email"
                 type="email"
+                autoComplete="email"
                 error={errors.email?.message}
             />
             <AuthTextField
                 registration={register('password')}
                 label="Password"
                 type="password"
+                autoComplete="current-password"
                 error={errors.password?.message}
             />
         </AuthFormLayout>

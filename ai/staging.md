@@ -22,6 +22,8 @@ production in:
   on staging never replaces production's;
 - mail, which stays off: `SMTP_HOST` is blank, because `scripts/copy-production.sh`
   fills staging with production's accounts, and mail to them would reach real people;
+- sign-in providers, which stay off until `OAUTH_GOOGLE_*` is filled in, and need
+  staging's own redirect URI registered with the provider;
 - access: `STAGING_HTPASSWD` names an htpasswd file, and host nginx then asks for a
   password before it serves any page or API call.
 
@@ -69,10 +71,10 @@ is `my-app-staging`.
     ```
 
 3. Fill in every blank in `.env` except `SMTP_HOST`, which stays blank so staging sends
-   no mail. Generate each secret with `openssl rand -hex 32`, and repeat
-   `POSTGRES_PASSWORD` inside `DATABASE_URL`. Set both `CORS_ALLOWED_ORIGINS` and
-   `PUBLIC_BASE_URL` to `https://<DOMAIN>`. `PRODUCTION_DIR` must name production's
-   clone, and `STAGING_HTPASSWD` the file the next step creates.
+   no mail, and the optional `OAUTH_GOOGLE_*` keys. Generate each secret with
+   `openssl rand -hex 32`, and repeat `POSTGRES_PASSWORD` inside `DATABASE_URL`. Set both
+   `CORS_ALLOWED_ORIGINS` and `PUBLIC_BASE_URL` to `https://<DOMAIN>`. `PRODUCTION_DIR`
+   must name production's clone, and `STAGING_HTPASSWD` the file the next step creates.
 4. Create the password file. `openssl passwd -6` asks for the password twice, and
    testers sign in as `tester` with it. The group and mode let nginx, which runs as
    `www-data` on Ubuntu, read the file:
@@ -169,7 +171,9 @@ Production is only read. In order, the script:
    entrypoint runs `db upgrade` first, so staging's migrations run on the copy, which is
    the rehearsal.
 
-Testers then sign in to staging with their production passwords.
+Testers then sign in to staging with their production passwords. An account with no
+password, which a sign-in provider created, can sign in there only when staging has that
+provider's keys.
 
 The copy holds every account's email and password hash, so staging must stay behind its
 password. The script refuses until staging's installed nginx site asks for one; set

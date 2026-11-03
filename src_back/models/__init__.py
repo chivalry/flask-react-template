@@ -7,6 +7,7 @@ here and its classes are added to ``__all__``.
 
 from src_back.models.audit_log import AuditAction, AuditLog
 from src_back.models.base import BaseMixin
+from src_back.models.oauth_account import OAuthAccount
 from src_back.models.user import Role, User
 
-__all__ = ['AuditAction', 'AuditLog', 'BaseMixin', 'Role', 'User']
+__all__ = ['AuditAction', 'AuditLog', 'BaseMixin', 'OAuthAccount', 'Role', 'User']

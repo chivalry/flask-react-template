@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { me } from '../api/auth'
 import { getHealth } from '../api/health'
+import { listLinkedAccounts, listProviders } from '../api/oauth'
 import { usersApi } from '../api/users'
 import App from '../App'
 import { useAuthStore } from '../store/auth'
@@ -14,6 +15,7 @@ import Providers from './utils/Providers'
 
 vi.mock('../api/auth')
 vi.mock('../api/health')
+vi.mock('../api/oauth')
 vi.mock('../api/users')
 
 // The app reads the query client from context, so it renders inside the test providers.
@@ -42,6 +44,8 @@ describe('App', () => {
         useAuthStore.setState({ user: null, isLoading: true })
         vi.mocked(usersApi.list).mockResolvedValue([adminUser, plainUser])
         vi.mocked(getHealth).mockReturnValue(new Promise(() => undefined))
+        vi.mocked(listProviders).mockReturnValue(new Promise(() => undefined))
+        vi.mocked(listLinkedAccounts).mockResolvedValue([])
     })
 
     it('asks the server who is signed in on mount', async () => {
@@ -129,6 +133,28 @@ describe('App', () => {
         expect(screen.queryByRole('tab')).not.toBeInTheDocument()
         expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument()
         expect(usersApi.list).not.toHaveBeenCalled()
+    })
+
+    it('renders the account page at /account when signed in', async () => {
+        signedIn(plainUser)
+
+        renderAppAtPath('/account')
+
+        expect(
+            await screen.findByRole('heading', { level: 1, name: 'Account' }),
+        ).toBeInTheDocument()
+        expect(await screen.findByText('No providers are linked.')).toBeInTheDocument()
+    })
+
+    it('redirects a signed-out visitor from /account to the login page', async () => {
+        signedOut()
+
+        renderAppAtPath('/account')
+
+        expect(
+            await screen.findByRole('heading', { name: 'Sign in' }),
+        ).toBeInTheDocument()
+        expect(listLinkedAccounts).not.toHaveBeenCalled()
     })
 
     it('renders the login page at /login', async () => {

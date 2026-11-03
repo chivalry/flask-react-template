@@ -1,7 +1,7 @@
 /** @file Accounts and audit entries shared by the tests: an admin, a user, a widget. */
 
 import type { AuditLogEntry } from '../../types/auditLog'
-import type { AuthUser } from '../../types/auth'
+import type { AuthUser, LinkedAccount, OAuthProviderInfo } from '../../types/auth'
 import type { PaginatedResponse } from '../../types/pagination'
 
 const stamps = { created_at: '2026-10-10T00:00:00Z', updated_at: '2026-10-10T00:00:00Z' }
@@ -23,6 +23,19 @@ export const plainUser: AuthUser = {
     role: 'user',
     has_password: true,
     is_active: true,
+    ...stamps,
+}
+
+/** Google, as the providers route lists it once its keys are set. */
+export const googleProvider: OAuthProviderInfo = { name: 'google', label: 'Google' }
+
+/** The signed-in account's link to a Google identity with an address of its own. */
+export const linkedGoogleAccount: LinkedAccount = {
+    id: 1,
+    uuid: 'oauth-uuid-1',
+    provider: 'google',
+    email: 'user@gmail.com',
+    display_name: 'Plain User',
     ...stamps,
 }
 

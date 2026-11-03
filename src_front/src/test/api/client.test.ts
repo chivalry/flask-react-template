@@ -170,6 +170,16 @@ describe('response interceptors', () => {
         expect(handler).not.toHaveBeenCalled()
     })
 
+    it('report a 401 from the linked accounts', async () => {
+        await expect(
+            client.get('/v1/auth/oauth/accounts', {
+                adapter: respondWith(401, { error: 'Unauthorized' }),
+            }),
+        ).rejects.toThrow('Unauthorized')
+
+        expect(handler).toHaveBeenCalledTimes(1)
+    })
+
     it('do not report other failures', async () => {
         await expect(
             client.get('/v1/things', {

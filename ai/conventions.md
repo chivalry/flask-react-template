@@ -51,7 +51,9 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   one and answers with its envelope from `utils.py`: `DuplicateRecordError`,
   `RecordInUseError`, `ProtectedRecordError`, and `LastSignInMethodError` with
   `conflict(str(exc))` (409), `SelfModificationError` with `bad_request(str(exc))`
-  (400), and `InactiveAccountError` with `forbidden(str(exc))` (403).
+  (400), and `InactiveAccountError` with `forbidden(str(exc))` (403). `OAuthError`
+  differs: the provider routes answer it with a redirect carrying its code, and
+  `InactiveAccountError` there with the code `account_inactive`.
 - A service removes a stored file only after the commit that stops referencing it,
   through `delete_upload()` in `utils.py`, which ignores a file that is already gone:
   in `after_delete` for a deleted record, and after its own commit when an update
@@ -86,12 +88,13 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   ignore SameSite. A form cannot set a custom header, and a script on another origin
   cannot send one without a CORS preflight, which only the origins in
   `CORS_ALLOWED_ORIGINS` pass: production sets it to the site's own origin, while
-  development's `*` passes every origin. A route that must accept a cross-site POST,
-  such as Sign in with Apple's `form_post` callback (#30), must be exempted in that
-  hook and check its own `state` instead.
+  development's `*` passes every origin. A route that must accept a cross-site POST is
+  named in `_CROSS_SITE_POST_ENDPOINTS` in `app.py` and checks its own signed `state`
+  instead; `oauth.callback`, which Sign in with Apple's `form_post` answer reaches (#30),
+  is the only one.
 - Accounts are deactivated, never deleted, so the rows that reference them stay
   intact. `complete_login` refuses a deactivated account with `InactiveAccountError`,
-  and every caller checks the credential first, so the 403 never tells a stranger that
+  and every caller checks the credential first, so the refusal never tells a stranger that
   an address is registered. A deactivated account's session ends on its next request:
   `load_user` in `app.py` loads it as nobody, and Flask-Login's `is_authenticated`
   follows `is_active` as well. An admin cannot demote or deactivate themself
@@ -123,6 +126,9 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - Errors are `{"error": "message"}` with `400`, `401`, `403`, `404`, `409`, `413`,
   `422`, `429`, or `500`. Validation failures are `422`. Host nginx answers throttled
   sign-in POSTs with `429` (`ai/auth.md`).
+- `start` and `callback` under `/api/v1/auth/oauth` are the one exception to that
+  envelope: they are browser navigations, so every outcome is a redirect, and a failure
+  lands on `/login?error=<code>` or `/account?error=<code>` (`ai/auth.md`).
 - Paginated lists are `{"items": [...], "total", "page", "pages", "per_page"}`, with
   `per_page` capped at 100.
 - Image uploads go through `validate_image_file()`; stored files are served from
@@ -177,7 +183,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `removeQueries` before invalidating the list, because the list's prefix invalidation
   would otherwise refetch the deleted record and show it from cache through the
   retries. `useSessionQueryCache()` in `App.tsx` clears the cache whenever the
-  signed-in account changes, so one account never sees another's data.
+  signed-in account changes, so one account never sees another's data. A public value a
+  signed-out page needs, such as the deployment's environment or the enabled sign-in
+  providers, is fetched once into local state instead (`EnvironmentBadge`,
+  `useProviders`), because `useSessionQueryCache()` would cancel the query during sign-in.
 - Forms use React Hook Form with Zod schemas; a form in a dialog is a `FormDialog` whose
   fields are `FormTextField`, `FormSelectField`, and `FormSwitchField` from
   `components/common/`. Request errors surface through `useApiError`, which
@@ -211,6 +220,12 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - Component files export only components: `react-refresh/only-export-components` warns
   on any other export except a primitive constant, and CI fails on warnings, so shared
   constants and helpers live in `.ts` modules.
+- `vite.config.ts` runs the React Compiler in production builds only, so Vitest and the
+  dev server never see what it changes. It compares the property paths a component's
+  closures read while rendering, to decide when to rebuild them, so a closure must not
+  read `x!.y` where `x` can be null at render, as an unopened dialog's record is.
+  `UnlinkDialog` in `components/account/LinkedAccounts.tsx` reads such a value into a
+  local during render instead. Only a production build in a browser shows the crash.
 - Every file starts with a `@file` JSDoc block, and every function, interface, and
   type alias has JSDoc without types in its tags. Functions stay under 50 lines.
 - Prettier: single quotes, no semicolons, 4-space indentation, print width 90.

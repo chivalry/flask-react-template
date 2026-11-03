@@ -132,6 +132,8 @@ assert_contains '^APP_ENVIRONMENT=staging$' "$STAGING_EXAMPLE"
 assert_contains '^DEPLOY_BRANCH=staging$' "$STAGING_EXAMPLE"
 assert_contains '^STAGING_HTPASSWD=/' "$STAGING_EXAMPLE"
 assert_contains '^SMTP_HOST=$' "$STAGING_EXAMPLE"
+assert_contains '^OAUTH_GOOGLE_CLIENT_ID=$' "$STAGING_EXAMPLE"
+assert_contains '^OAUTH_GOOGLE_CLIENT_SECRET=$' "$STAGING_EXAMPLE"
 sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' "$STAGING_EXAMPLE" > "$TEST_DIR/staging-keys"
 assert_contains '^APP_NAME$' "$TEST_DIR/staging-keys"
 while IFS= read -r key; do

@@ -3,7 +3,8 @@
 Route handlers catch them and answer with the matching envelope from
 :mod:`src_back.utils`: :func:`~src_back.utils.conflict` for a 409,
 :func:`~src_back.utils.bad_request` for a 400, and
-:func:`~src_back.utils.forbidden` for a 403.
+:func:`~src_back.utils.forbidden` for a 403. :class:`OAuthError` differs: a provider
+sign-in is a browser navigation, so its routes answer with a redirect.
 """
 
 
@@ -39,3 +40,16 @@ class SelfModificationError(Exception):
 
 class InactiveAccountError(Exception):
     """A deactivated account tried to sign in (403)."""
+
+
+class OAuthError(Exception):
+    """A sign-in through a provider failed; the routes redirect with its code."""
+
+    def __init__(self, code: str) -> None:
+        """Record why the sign-in failed.
+
+        Args:
+            code: The ``?error=`` value, which the frontend turns into a message.
+        """
+        super().__init__(code)
+        self.code = code

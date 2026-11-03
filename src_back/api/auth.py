@@ -7,6 +7,7 @@ from src_back.auth import current_user
 from src_back.schemas.user import login_schema, registration_schema, user_schema
 from src_back.services.auth import authenticate_user, complete_login, register_user
 from src_back.services.errors import DuplicateRecordError, InactiveAccountError
+from src_back.services.oauth_state import clear_transaction_cookie
 from src_back.utils import (
     ErrorResponse,
     conflict,
@@ -76,14 +77,17 @@ def logout() -> Response:
 
     ``logout_user()`` removes only Flask-Login's keys, so clearing the session
     also drops the permanent flag that login set. Flask deletes the cookie of an
-    emptied session instead of renewing it.
+    emptied session instead of renewing it. The provider transaction goes too: it can
+    name this account, and linking must not finish after a sign-out.
 
     Returns:
         A JSON confirmation message.
     """
     logout_user()
     session.clear()
-    return jsonify({'message': 'Logged out.'})
+    response = jsonify({'message': 'Logged out.'})
+    clear_transaction_cookie(response)
+    return response
 
 
 @bp.get('/me')

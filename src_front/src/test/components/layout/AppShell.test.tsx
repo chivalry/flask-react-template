@@ -19,6 +19,7 @@ const renderShell = (initialPath = '/') =>
                 <Route element={<AppShell />}>
                     <Route index element={<div>Outlet child content</div>} />
                     <Route path="/other" element={<div>Other page</div>} />
+                    <Route path="/account" element={<div>Account page</div>} />
                     <Route path="/admin/users" element={<div>Users page</div>} />
                 </Route>
             </Routes>
@@ -105,16 +106,32 @@ describe('AppShell', () => {
         )
     })
 
+    it('marks Account current on the account page', () => {
+        renderShell('/account')
+
+        expect(screen.getByText('Account page')).toBeInTheDocument()
+        const accountLink = screen.getByRole('link', { name: 'Account' })
+        expect(accountLink).toHaveAttribute('href', '/account')
+        expect(accountLink).toHaveAttribute('aria-current', 'page')
+        expect(screen.getByRole('link', { name: 'Home' })).not.toHaveAttribute(
+            'aria-current',
+        )
+    })
+
     it('keeps every button named when its label is hidden', () => {
         useAuthStore.getState().setUser(adminUser)
         renderShell()
 
         // Below sm a media query hides the labels; jsdom ignores it, so hide them here.
-        for (const label of ['Home', 'Admin', 'Logout']) {
+        for (const label of ['Home', 'Account', 'Admin', 'Logout']) {
             screen.getByText(label).style.display = 'none'
         }
 
         expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument()
+        expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute(
+            'href',
+            '/account',
+        )
         expect(screen.getByRole('link', { name: 'Admin' })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'Logout' })).toBeInTheDocument()
     })
