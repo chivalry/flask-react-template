@@ -17,12 +17,16 @@ to put new behavior in the right service.
   state. Nothing deletes an account; deactivating one (`User.is_active`) keeps the rows
   that reference it, and an admin cannot demote or deactivate themself. An `OAuthAccount`
   links a provider identity to an account, one per provider, matched on the provider's
-  subject and never on its email (`src_back/services/oauth.py`, `ai/auth.md`).
+  subject and never on its email (`src_back/services/oauth.py`, `ai/auth.md`). A
+  `WebAuthnCredential` is a passkey; an account has any number, each found at sign-in by
+  its credential id and tied to its account by the user handle, the account's `uuid`
+  (`src_back/services/passkeys.py`, `ai/auth.md`).
 - Audit log: `AuditLog` rows record each create, update, and delete an audited
   service makes (`src_back/services/audit_log.py`), with the signed-in account as the
   actor. Accounts are audited at registration, when a sign-in provider creates one, on
-  the admin's Users screen, and by the seed, and each provider link in `oauth_accounts`;
-  their history is admin-only, and a password change appears only masked.
+  the admin's Users screen, and by the seed, each provider link in `oauth_accounts`, and
+  each passkey in `webauthn_credentials`; their history is admin-only, and a password
+  change appears only masked.
   Anyone signed in reads one record's history through `/api/v1/audit-logs`; admins
   read and filter the whole log on the Audit tab of the admin screen.
 
@@ -41,6 +45,11 @@ to put new behavior in the right service.
   creates one
 - `inactive_user` - a persisted, deactivated account with the password `password123`
 - `linked_user` - a passwordless account linked to Google
+- `authenticator` - a `SoftwareAuthenticator`
+  (`src_back/tests/software_authenticator.py`), a P-256 passkey that answers both
+  ceremonies as a browser would
+- `passkey_user` - `passwordless_user` with that authenticator's passkey as its only way
+  in
 - `auth_client` and `admin_client` - clients signed in as those accounts
 - `Widget` and `WidgetNote` - test-only models exercising the generic services and
   `BaseSchema`; `test_base_service.py` builds audited services over them

@@ -102,7 +102,7 @@ def complete_login(user: User) -> None:
     """Start the session of a user whose identity has been verified.
 
     Every sign-in ends here, whatever proved the identity: registration, password
-    login, and a provider callback now, a passkey later. Each of them therefore inherits
+    login, a provider callback, and a passkey. Each of them therefore inherits
     the refusal of a deactivated account. Without it, Flask-Login's ``login_user``
     would return ``False`` without signing anyone in, and the route would still
     answer 200. Callers verify the credential first, so the refusal reaches only
@@ -125,8 +125,7 @@ def complete_login(user: User) -> None:
 def count_sign_in_methods(user: User) -> int:
     """Count the ways an account can sign in.
 
-    A password and each linked provider count; passkeys join the count when their table
-    arrives.
+    A password, each linked provider, and each passkey count.
 
     Args:
         user: The account to inspect.
@@ -134,7 +133,8 @@ def count_sign_in_methods(user: User) -> int:
     Returns:
         The number of sign-in methods the account has.
     """
-    return (1 if user.has_password else 0) + len(user.oauth_accounts)
+    providers_and_passkeys = len(user.oauth_accounts) + len(user.passkeys)
+    return (1 if user.has_password else 0) + providers_and_passkeys
 
 
 def require_another_sign_in_method(user: User) -> None:

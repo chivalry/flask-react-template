@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom'
 import { z } from 'zod'
 
 import { login } from '../api/auth'
-import ProviderButtons from '../components/auth/ProviderButtons'
+import SignInOptions from '../components/auth/SignInOptions'
 import AuthFormLayout, { AuthTextField } from '../components/AuthFormLayout'
 import { useAuthFormState } from '../hooks/useAuthFormState'
 
@@ -19,7 +19,8 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>
 
 /**
- * Render the sign-in form and submit it to the auth API.
+ * Render the sign-in form, with a passkey and the providers beneath it, and submit it
+ * to the auth API.
  *
  * Validates only that a password was entered, not its length, so an account
  * created before a policy change can still sign in.
@@ -50,7 +51,7 @@ export default function Login() {
             apiError={apiError}
             isSubmitting={isSubmitting}
             submitLabel={isSubmitting ? 'Signing in…' : 'Sign in'}
-            secondary={<ProviderButtons next={returnPath} />}
+            secondary={<SignInOptions next={returnPath} run={handleAuthAction} />}
             footer={
                 <>
                     No account? <Link to="/register">Register</Link>
@@ -62,7 +63,7 @@ export default function Login() {
                 registration={register('email')}
                 label="Email"
                 type="email"
-                autoComplete="email"
+                autoComplete="username webauthn"
                 error={errors.email?.message}
             />
             <AuthTextField

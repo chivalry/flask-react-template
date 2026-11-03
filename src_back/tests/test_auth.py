@@ -23,6 +23,8 @@ from src_back.services.auth import (
 )
 from src_back.services.errors import InactiveAccountError, LastSignInMethodError
 from src_back.services.oauth_state import SECURE_COOKIE_NAME
+from src_back.tests.helpers import persist
+from src_back.tests.software_authenticator import SoftwareAuthenticator
 
 SESSION_LIFETIME = timedelta(days=SESSION_LIFETIME_DAYS)
 
@@ -402,6 +404,16 @@ def test_count_sign_in_methods_counts_each_linked_provider(linked_user: User) ->
     assert count_sign_in_methods(linked_user) == 1
     linked_user.set_password('password123')
     assert count_sign_in_methods(linked_user) == 2
+
+
+def test_count_sign_in_methods_counts_each_passkey(
+    linked_user: User, authenticator: SoftwareAuthenticator
+) -> None:
+    assert count_sign_in_methods(linked_user) == 1
+    persist(authenticator.credential_for(linked_user))
+    assert count_sign_in_methods(linked_user) == 2
+    persist(SoftwareAuthenticator().credential_for(linked_user))
+    assert count_sign_in_methods(linked_user) == 3
 
 
 def test_require_another_sign_in_method(linked_user: User) -> None:

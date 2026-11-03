@@ -50,10 +50,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - Services raise the exceptions in `services/errors.py`, and the handler catches each
   one and answers with its envelope from `utils.py`: `DuplicateRecordError`,
   `RecordInUseError`, `ProtectedRecordError`, and `LastSignInMethodError` with
-  `conflict(str(exc))` (409), `SelfModificationError` with `bad_request(str(exc))`
-  (400), and `InactiveAccountError` with `forbidden(str(exc))` (403). `OAuthError`
-  differs: the provider routes answer it with a redirect carrying its code, and
-  `InactiveAccountError` there with the code `account_inactive`.
+  `conflict(str(exc))` (409), `SelfModificationError` and `PasskeyError` with
+  `bad_request(str(exc))` (400), and `InactiveAccountError` with `forbidden(str(exc))`
+  (403). `OAuthError` differs: the provider routes answer it with a redirect carrying its
+  code, and `InactiveAccountError` there with the code `account_inactive`.
 - A service removes a stored file only after the commit that stops referencing it,
   through `delete_upload()` in `utils.py`, which ignores a file that is already gone:
   in `after_delete` for a deleted record, and after its own commit when an update
@@ -147,7 +147,8 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - The axios client (`api/client.ts`) uses `baseURL: '/api'`, `withCredentials`, and the
   `X-Requested-With: XMLHttpRequest` header that the backend requires on every request
   that changes data. Its interceptors copy the server's `error` text onto
-  `error.message` and notify the auth store on a 401.
+  `error.message` and notify the auth store on a 401, except from a sign-in step, where a
+  401 is a refused credential (`isSignInStep` in `api/client.ts`).
 - A file download goes through `downloadFile(path, filename)` from `api/downloads.ts`. Its
   `path` is relative to the API base, like every call through the client, so a stored
   file under `/uploads`, outside that base, needs a plain link. Going through the client
@@ -169,7 +170,8 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   error boundary that clears when the path changes, so a failing page, or a page
   whose chunk fails to load, keeps the app bar. `vite.config.ts` groups third-party
   code into the `react`, `mui`, and `forms` vendor chunks; add a large new dependency
-  to one of them in `VENDOR_CHUNKS`.
+  to one of them in `VENDOR_CHUNKS`; a small one that only lazy pages import, such as
+  `@simplewebauthn/browser`, needs none.
 - Admin pages sit behind `AdminRoute`, inside `ProtectedRoute`, which sends non-admins
   to `/`. `pages/AdminPage.tsx` builds its tabs and its descendant routes from one
   `SECTIONS` array, so a new admin screen is one more entry there.

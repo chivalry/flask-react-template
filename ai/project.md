@@ -12,19 +12,20 @@ that every contributor and agent follows.
       runs once; `example.py` is the one to copy (Scheduled Jobs, below)
     - `models/` - SQLAlchemy models, one module per domain; `base.py` holds
       `BaseMixin`, `user.py` holds `Role` and `User`, `audit_log.py` holds `AuditAction`
-      and `AuditLog`, `oauth_account.py` holds `OAuthAccount`, and `__init__.py`
-      re-exports every model, so `from src_back.models import User` works and every
-      table registers
+      and `AuditLog`, `oauth_account.py` holds `OAuthAccount`, `webauthn_credential.py`
+      holds `WebAuthnCredential`, and `__init__.py` re-exports every model, so
+      `from src_back.models import User` works and every table registers
     - `schemas/` - Marshmallow schemas; `schemas/base.py` holds `BaseSchema` and
       `validate_ids_exist()`
     - `services/` - business logic by domain; `services/base.py` holds the generic
       `CRUDService`, `ChildRecordService`, and `require_unique_name()`,
       `services/errors.py` the exceptions services raise, `services/audit_log.py` the
       audit trail and the history queries, `services/oauth.py`, `oauth_providers.py`,
-      `oauth_state.py`, and `oidc.py` sign-in through a provider, and `services/users.py`
-      the admin's account management
+      `oauth_state.py`, and `oidc.py` sign-in through a provider, `services/passkeys.py`
+      the passkey ceremonies and their upkeep, and `services/users.py` the admin's account
+      management
     - `tests/` - pytest; one `test_<module>.py` per module; `helpers.py` holds
-      `persist()`
+      `persist()`, and `software_authenticator.py` a software passkey
     - `app.py` - application factory, error handlers, SPA and upload serving
     - `auth.py` - `current_user` typed as `User`, for routes behind `@login_required`
     - `extensions.py` - shared Flask extensions and the declarative `Base`

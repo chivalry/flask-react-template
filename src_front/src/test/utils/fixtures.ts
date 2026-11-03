@@ -1,7 +1,12 @@
-/** @file Accounts and audit entries shared by the tests: an admin, a user, a widget. */
+/** @file Test accounts, a passkey, and audit entries: an admin, a user, a widget. */
 
 import type { AuditLogEntry } from '../../types/auditLog'
-import type { AuthUser, LinkedAccount, OAuthProviderInfo } from '../../types/auth'
+import type {
+    AuthUser,
+    LinkedAccount,
+    OAuthProviderInfo,
+    Passkey,
+} from '../../types/auth'
 import type { PaginatedResponse } from '../../types/pagination'
 
 const stamps = { created_at: '2026-10-10T00:00:00Z', updated_at: '2026-10-10T00:00:00Z' }
@@ -36,6 +41,19 @@ export const linkedGoogleAccount: LinkedAccount = {
     provider: 'google',
     email: 'user@gmail.com',
     display_name: 'Plain User',
+    ...stamps,
+}
+
+/** The signed-in account's synced laptop passkey, last used on October 14. */
+export const laptopPasskey: Passkey = {
+    id: 3,
+    uuid: 'passkey-uuid-3',
+    nickname: 'Laptop',
+    aaguid: '00000000-0000-0000-0000-000000000000',
+    transports: 'internal,hybrid',
+    backup_eligible: true,
+    backup_state: true,
+    last_used_at: '2026-10-14T16:05:00Z',
     ...stamps,
 }
 

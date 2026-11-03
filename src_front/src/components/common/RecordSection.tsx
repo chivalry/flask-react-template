@@ -88,6 +88,9 @@ function RecordDeleteDialog<T extends { id: number }>(props: RecordDeleteDialogP
         message = permanenceWarning,
         onClose,
     } = props
+    // In production builds the React Compiler compares the paths confirm reads while
+    // rendering, when item is still null, so the id is read safely here (#57).
+    const itemId = item?.id
 
     /**
      * Delete the selected record, then close the confirmation, which cannot be
@@ -95,7 +98,7 @@ function RecordDeleteDialog<T extends { id: number }>(props: RecordDeleteDialogP
      */
     const confirm = async () => {
         // Delete is clickable only while open, and the dialog is open only with an item.
-        await remove.mutateAsync(item!.id)
+        await remove.mutateAsync(itemId!)
         onClose()
     }
 

@@ -22,7 +22,7 @@ interface ApiErrorBody {
     error?: string
 }
 
-/** Callback run when a request outside the auth endpoints is refused with 401. */
+/** Callback run when a request outside the sign-in steps is refused with 401. */
 type UnauthorizedHandler = () => void
 
 const client = axios.create({
@@ -87,21 +87,51 @@ export async function surfaceApiError(
     return Promise.reject(error)
 }
 
+/** Under `/v1/auth/`, the routes of a signed-in account, whose 401 is a lost session. */
+const SIGNED_IN_AUTH_PATHS = ['/v1/auth/oauth', '/v1/auth/passkeys']
+
+/** The passkey sign-in, whose 401 is a refused passkey, as a wrong password is. */
+const PASSKEY_SIGN_IN_PATH = '/v1/auth/passkeys/login'
+
+/**
+ * Tell whether a URL is a path or lies beneath it.
+ *
+ * @param url - The request URL, relative to the API base.
+ * @param path - The path to compare with.
+ * @returns True for the path itself and anything under it.
+ */
+function isUnder(url: string, path: string): boolean {
+    return url === path || url.startsWith(`${path}/`)
+}
+
+/**
+ * Tell whether a 401 from a URL means a sign-in failed rather than a session was lost.
+ *
+ * Every `/v1/auth/` route is a sign-in step but the linked accounts and the passkeys,
+ * which serve a signed-in account, and of those only the passkey sign-in is a step again.
+ * The passkey list is `/v1/auth/passkeys` itself, with no trailing slash.
+ *
+ * @param url - The request URL, relative to the API base.
+ * @returns True when the 401 is a form error, such as a wrong password.
+ */
+function isSignInStep(url: string | undefined): boolean {
+    if (!url?.startsWith('/v1/auth/')) return false
+    if (isUnder(url, PASSKEY_SIGN_IN_PATH)) return true
+    return !SIGNED_IN_AUTH_PATHS.some((path) => isUnder(url, path))
+}
+
 /**
  * Run the registered handler when a request was refused for want of a session.
  *
- * A 401 from the auth endpoints themselves is skipped: a wrong password is a form
- * error, not a lost session. The linked accounts under `/v1/auth/oauth/` are ordinary
- * signed-in requests, so their 401 counts.
+ * A 401 from a sign-in step is skipped: a wrong password or a refused passkey is a form
+ * error, not a lost session. The linked accounts under `/v1/auth/oauth/` and the passkeys
+ * under `/v1/auth/passkeys` are ordinary signed-in requests, so their 401 counts.
  *
  * @param error - The rejection axios produced for a failed request.
  * @returns A promise rejected with the same error.
  */
 function reportLostSession(error: AxiosError): Promise<never> {
-    const url = error.config?.url
-    const isAuthEndpoint =
-        url?.startsWith('/v1/auth/') && !url.startsWith('/v1/auth/oauth/')
-    if (error.response?.status === 401 && !isAuthEndpoint) {
+    if (error.response?.status === 401 && !isSignInStep(error.config?.url)) {
         unauthorizedHandler?.()
     }
     return Promise.reject(error)

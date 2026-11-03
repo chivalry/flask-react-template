@@ -229,7 +229,7 @@ project/
 │   ├── mailer.py      # Plain-text SMTP mail; off while SMTP_HOST is blank
 │   ├── models/        # Package: base.py has BaseMixin, user.py has Role and User
 │   ├── utils.py       # Error envelopes, pagination, parsing, upload checks, CSV
-│   ├── api/           # Blueprints (health, auth, OAuth, users, audit logs)
+│   ├── api/           # Blueprints (health, auth, OAuth, passkeys, users, audit logs)
 │   ├── schemas/       # Marshmallow schemas; base.py has BaseSchema
 │   ├── services/      # Business logic; base.py has the generic CRUD services
 │   ├── seed.py        # Idempotent seed; creates the first admin

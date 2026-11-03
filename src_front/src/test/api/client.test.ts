@@ -180,6 +180,43 @@ describe('response interceptors', () => {
         expect(handler).toHaveBeenCalledTimes(1)
     })
 
+    // The list is the passkey path itself, with no trailing slash.
+    it.each([
+        '/v1/auth/passkeys',
+        '/v1/auth/passkeys/3',
+        '/v1/auth/passkeys/register/options',
+    ])('report a 401 from the signed-in passkey route %s', async (url) => {
+        await expect(
+            client.get(url, { adapter: respondWith(401, { error: 'Unauthorized' }) }),
+        ).rejects.toThrow('Unauthorized')
+
+        expect(handler).toHaveBeenCalledTimes(1)
+    })
+
+    it('do not report a 401 from the passkey sign-in', async () => {
+        const refused = 'That passkey was not accepted.'
+
+        await expect(
+            client.post(
+                '/v1/auth/passkeys/login/verify',
+                {},
+                { adapter: respondWith(401, { error: refused }) },
+            ),
+        ).rejects.toThrow(refused)
+
+        expect(handler).not.toHaveBeenCalled()
+    })
+
+    it('do not report a 401 from a sign-in step that only begins like one', async () => {
+        await expect(
+            client.get('/v1/auth/oauthx', {
+                adapter: respondWith(401, { error: 'Unauthorized' }),
+            }),
+        ).rejects.toThrow('Unauthorized')
+
+        expect(handler).not.toHaveBeenCalled()
+    })
+
     it('do not report other failures', async () => {
         await expect(
             client.get('/v1/things', {

@@ -25,6 +25,7 @@ from src_back.services.oauth_providers import (
     build_registry,
 )
 from src_back.tests.helpers import persist
+from src_back.tests.software_authenticator import SoftwareAuthenticator
 
 # A 1x1 PNG: enough for filetype to sniff image/png.
 PNG_BYTES = (
@@ -181,6 +182,19 @@ def linked_user(passwordless_user: User) -> User:
             email=passwordless_user.email,
         )
     )
+    return passwordless_user
+
+
+@pytest.fixture()
+def authenticator() -> SoftwareAuthenticator:
+    return SoftwareAuthenticator()
+
+
+@pytest.fixture()
+def passkey_user(passwordless_user: User, authenticator: SoftwareAuthenticator) -> User:
+    # A passkey is its only way in, as for an account a provider created that added a
+    # passkey and then unlinked the provider.
+    persist(authenticator.credential_for(passwordless_user))
     return passwordless_user
 
 

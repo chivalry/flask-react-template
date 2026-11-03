@@ -24,6 +24,7 @@ from src_back.services.oauth_state import (
 )
 from src_back.tests.conftest import OAUTH_CLIENT_ID, OidcSigner
 from src_back.tests.helpers import persist
+from src_back.tests.software_authenticator import SoftwareAuthenticator
 
 OAUTH_URL = '/api/v1/auth/oauth'
 START_URL = f'{OAUTH_URL}/google/start'
@@ -980,6 +981,20 @@ def test_unlink_of_the_last_method_is_409(
     assert response.status_code == 409
     assert response.get_json() == {'error': LAST_METHOD}
     assert len(linked_user.oauth_accounts) == 1
+
+
+def test_unlink_is_allowed_while_a_passkey_remains(
+    client: FlaskClient,
+    linked_user: User,
+    authenticator: SoftwareAuthenticator,
+    mocked_http: responses.RequestsMock,
+    oidc_signer: OidcSigner,
+) -> None:
+    persist(authenticator.credential_for(linked_user))
+    assert (
+        redirect_location(sign_in(client, mocked_http, oidc_signer, {})) == f'{ORIGIN}/'
+    )
+    assert client.delete(f'{ACCOUNTS_URL}/google').status_code == 204
 
 
 def test_unlink_needs_a_session(client: FlaskClient) -> None:

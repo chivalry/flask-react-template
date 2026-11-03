@@ -9,5 +9,14 @@ from src_back.models.audit_log import AuditAction, AuditLog
 from src_back.models.base import BaseMixin
 from src_back.models.oauth_account import OAuthAccount
 from src_back.models.user import Role, User
+from src_back.models.webauthn_credential import WebAuthnCredential
 
-__all__ = ['AuditAction', 'AuditLog', 'BaseMixin', 'OAuthAccount', 'Role', 'User']
+__all__ = [
+    'AuditAction',
+    'AuditLog',
+    'BaseMixin',
+    'OAuthAccount',
+    'Role',
+    'User',
+    'WebAuthnCredential',
+]

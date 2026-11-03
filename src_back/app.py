@@ -261,11 +261,19 @@ def _register_blueprints(app: Flask) -> None:
     Args:
         app: The application being configured.
     """
-    from src_back.api import audit_logs_bp, auth_bp, health_bp, oauth_bp, users_bp
+    from src_back.api import (
+        audit_logs_bp,
+        auth_bp,
+        health_bp,
+        oauth_bp,
+        passkeys_bp,
+        users_bp,
+    )
 
     app.register_blueprint(health_bp, url_prefix='/api')
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
     app.register_blueprint(oauth_bp, url_prefix='/api/v1/auth/oauth')
+    app.register_blueprint(passkeys_bp, url_prefix='/api/v1/auth/passkeys')
     app.register_blueprint(users_bp, url_prefix='/api/v1/users')
     app.register_blueprint(audit_logs_bp, url_prefix='/api/v1/audit-logs')
 

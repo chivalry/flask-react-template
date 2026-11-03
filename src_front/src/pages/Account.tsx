@@ -3,9 +3,10 @@
 import { Container, Typography } from '@mui/material'
 
 import LinkedAccounts from '../components/account/LinkedAccounts'
+import Passkeys from '../components/account/Passkeys'
 
 /**
- * Render the account page, which later sections, such as passkeys, join.
+ * Render the account page: its sign-in providers and its passkeys.
  *
  * @returns The account page element.
  */
@@ -16,6 +17,7 @@ export default function Account() {
                 Account
             </Typography>
             <LinkedAccounts />
+            <Passkeys />
         </Container>
     )
 }
