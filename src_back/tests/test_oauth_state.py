@@ -19,6 +19,10 @@ from src_back.services.oauth_state import (
 
 HTTP_ORIGIN = 'http://localhost:5174'
 DEFAULT_PATH = '/default'
+# é is six characters percent-encoded, so this fills the limit exactly once encoded.
+LONGEST_ENCODED_NEXT = (
+    '/' + 'é' * ((MAX_NEXT_LENGTH - 1) // 6) + 'a' * ((MAX_NEXT_LENGTH - 1) % 6)
+)
 
 
 def _transaction() -> OAuthTransaction:
@@ -186,6 +190,9 @@ def test_clear_transaction_cookie_deletes_it_over_http(app: Flask) -> None:
         ('/a\x7fb', DEFAULT_PATH),
         ('/' + 'a' * (MAX_NEXT_LENGTH - 1), '/' + 'a' * (MAX_NEXT_LENGTH - 1)),
         ('/' + 'a' * MAX_NEXT_LENGTH, DEFAULT_PATH),
+        (LONGEST_ENCODED_NEXT, LONGEST_ENCODED_NEXT),
+        (LONGEST_ENCODED_NEXT + 'a', DEFAULT_PATH),
+        ('//[evil.example', DEFAULT_PATH),
     ],
     ids=[
         'none',
@@ -202,6 +209,9 @@ def test_clear_transaction_cookie_deletes_it_over_http(app: Flask) -> None:
         'delete-character',
         'longest-kept',
         'one-too-long',
+        'longest-kept-encoded',
+        'one-too-long-encoded',
+        'malformed-host',
     ],
 )
 def test_safe_next(value: str | None, expected: str) -> None:

@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass
 
 from flask import current_app, request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from werkzeug.urls import iri_to_uri
 from werkzeug.wrappers import Response
 
 from src_back.services.errors import OAuthError
@@ -27,7 +28,7 @@ _COOKIE_PATH = '/api/v1/auth/oauth'
 _SERIALIZER_SALT = 'oauth-txn'
 
 MAX_NEXT_LENGTH = 512
-"""The longest return path; the cookie and a redirect header both carry it."""
+"""The longest return path once percent-encoded, as a redirect header carries it."""
 
 
 @dataclass(frozen=True)
@@ -206,7 +207,10 @@ def safe_next(value: str | None, default: str) -> str:
     The callback prefixes ``PUBLIC_BASE_URL``, which alone keeps a redirect on this
     origin; this refuses what a browser would still read as another host. Browsers treat
     a backslash as a slash and drop tabs and newlines from a URL, so a slash followed by
-    a backslash, or a control character, could turn a path into ``//host``.
+    a backslash, or a control character, could turn a path into ``//host``. The length is
+    counted percent-encoded, as the callback's redirect header carries the path: an emoji
+    takes twelve characters there, and nginx answers a header too large for its buffer
+    with a 502.
 
     Args:
         value: The ``next`` query parameter, if any.
@@ -217,10 +221,11 @@ def safe_next(value: str | None, default: str) -> str:
     """
     if (
         value is None
-        or len(value) > MAX_NEXT_LENGTH
         or not value.startswith('/')
         or value.startswith(('//', '/\\'))
         or not value.isprintable()
+        # Last: iri_to_uri raises on a malformed host such as //[, refused above.
+        or len(iri_to_uri(value)) > MAX_NEXT_LENGTH
     ):
         return default
     return value

@@ -79,10 +79,11 @@ changes what gets built.
     `utils/` is where framework-free helpers go. The messages sit in a `Map`: a `Record`
     lookup of `?error=__proto__` returns an object, which React refuses to render, so a
     crafted link would take the page down.
-13. **`next` is capped at 512 characters.** The cookie and the `Location` header both
-    carry it, and host nginx sets no `proxy_buffer_size`, so its default of one page (4 KB
-    on x86-64) holds the response headers and an overflow is a 502. A test pins the
-    budget.
+13. **`next` is capped at 512 characters, counted percent-encoded.** The cookie and the
+    `Location` header both carry it, and host nginx sets no `proxy_buffer_size`, so its
+    default of one page (4 KB on x86-64) holds the response headers and an overflow is a
+    502. Werkzeug percent-encodes `Location`, where an emoji takes twelve characters, so
+    the cap counts the encoded form. A test pins each response's budget.
 14. **Staging arrived after the issue.** `.env.staging.example` gains the two keys, blank
     and optional, and `ai/staging.md` says so. `scripts/copy-production.sh` copies
     `oauth_accounts` with the rest of the database, so a tester whose production account
@@ -400,6 +401,7 @@ from dataclasses import asdict, dataclass
 
 from flask import current_app, request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from werkzeug.urls import iri_to_uri
 from werkzeug.wrappers import Response
 
 from src_back.services.errors import OAuthError
@@ -413,7 +415,7 @@ _COOKIE_PATH = '/api/v1/auth/oauth'
 _SERIALIZER_SALT = 'oauth-txn'
 
 MAX_NEXT_LENGTH = 512
-"""The longest return path; the cookie and a redirect header both carry it."""
+"""The longest return path once percent-encoded, as a redirect header carries it."""
 
 
 @dataclass(frozen=True)
@@ -592,7 +594,10 @@ def safe_next(value: str | None, default: str) -> str:
     The callback prefixes ``PUBLIC_BASE_URL``, which alone keeps a redirect on this
     origin; this refuses what a browser would still read as another host. Browsers treat
     a backslash as a slash and drop tabs and newlines from a URL, so a slash followed by
-    a backslash, or a control character, could turn a path into ``//host``.
+    a backslash, or a control character, could turn a path into ``//host``. The length is
+    counted percent-encoded, as the callback's redirect header carries the path: an emoji
+    takes twelve characters there, and nginx answers a header too large for its buffer
+    with a 502.
 
     Args:
         value: The ``next`` query parameter, if any.
@@ -603,10 +608,11 @@ def safe_next(value: str | None, default: str) -> str:
     """
     if (
         value is None
-        or len(value) > MAX_NEXT_LENGTH
         or not value.startswith('/')
         or value.startswith(('//', '/\\'))
         or not value.isprintable()
+        # Last: iri_to_uri raises on a malformed host such as //[, refused above.
+        or len(iri_to_uri(value)) > MAX_NEXT_LENGTH
     ):
         return default
     return value
@@ -1817,7 +1823,10 @@ Writing goes onto a plain `flask.Response()`, with `Set-Cookie` read from its he
 - `test_safe_next`, parametrized on value and result: `None`, `''`, `'/'`, `'/a/b?c=1#d'`,
   `'//evil.example'`, `'/\\evil.example'`, `'https://evil.example'`,
   `'javascript:alert(1)'`, `'evil'`, `'/\t/evil.example'`, `'/a\nb'`, `'/a\x7fb'`, a path
-  of `MAX_NEXT_LENGTH` characters (kept), and one character longer (default).
+  of `MAX_NEXT_LENGTH` characters (kept), one character longer (default), a path of `é`
+  that fills `MAX_NEXT_LENGTH` exactly once percent-encoded (kept), one character longer
+  (default), and `'//[evil.example'` (default), which `iri_to_uri` would raise on if the
+  length check ran first.
 
 ### src_back/tests/test_oidc.py — new
 
@@ -1933,6 +1942,9 @@ with a `code` and the `state`; `finish_link` does the same after `begin_link`.
   `'/' + secrets.token_urlsafe(MAX_NEXT_LENGTH)[:MAX_NEXT_LENGTH - 1]`, imported from the
   module, because zlib shrinks a repeated character to nothing. The sum over headers of
   name plus value plus four is under 3500.
+- `test_callback_response_headers_fit_nginx_default_buffer`, parametrized on `next`:
+  `/?q=` and 42 emoji arrive percent-encoded, while `/?q=` and 400 emoji, which a count
+  of characters would keep, land on `/`. Each callback's headers stay under 3500.
 
 The policy, each through the real exchange and token check:
 
@@ -3191,6 +3203,14 @@ test could fail. Each one fails its test once its decision is undone.
   `/login?error=invalid_state`, because `/account` could only bounce the visitor to a
   sign-in page that showed no message. `ai/conventions.md` records the compiler rule, and
   the same pattern in `RecordSection` is #57.
+- An outside review of PR #56 found that `safe_next` counted decoded characters, while
+  Werkzeug percent-encodes `Location`: `/?q=` and 400 emoji made a 5.3 KB callback
+  header, which nginx 1.27 answers with a 502 under its default 4 KB buffer. `safe_next`
+  now counts `iri_to_uri(value)`, after the host checks, because `iri_to_uri` raises on a
+  malformed host such as `//[`. `test_safe_next` adds the encoded boundary and that host,
+  and `test_callback_response_headers_fit_nginx_default_buffer` covers the callback,
+  which the start test never did. Counting characters again, counting UTF-8 bytes, `>=`,
+  and moving the check first each fail a test.
 
 Two listed mutation checks cannot fail by design: dropping either key from
 `docker/docker-compose.prod.yml`, because Compose merges in the base file's identical

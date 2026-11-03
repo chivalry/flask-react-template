@@ -288,6 +288,30 @@ def test_start_response_headers_fit_nginx_default_buffer(
     assert size < 3500
 
 
+@pytest.mark.parametrize(
+    ('next_path', 'landing'),
+    [
+        ('/?q=' + '\U0001f600' * 42, '/?q=' + '%F0%9F%98%80' * 42),
+        ('/?q=' + '\U0001f600' * 400, '/'),
+    ],
+    ids=['longest-kept', 'too-long-once-encoded'],
+)
+def test_callback_response_headers_fit_nginx_default_buffer(
+    client: FlaskClient,
+    mocked_http: responses.RequestsMock,
+    oidc_signer: OidcSigner,
+    next_path: str,
+    landing: str,
+) -> None:
+    # An emoji is one character in next and twelve in the redirect header.
+    params = begin(client, next=next_path)
+    answer_token_request(mocked_http, oidc_signer, params['nonce'], VERIFIED)
+    response = run_callback(client, params)
+    assert redirect_location(response) == f'{ORIGIN}{landing}'
+    size = sum(len(name) + len(value) + 4 for name, value in response.headers.items())
+    assert size < 3500
+
+
 # The linking policy, each through the real exchange and token check
 
 
