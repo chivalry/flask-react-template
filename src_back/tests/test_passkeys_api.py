@@ -10,14 +10,9 @@ from werkzeug.test import TestResponse
 
 from src_back.models import AuditLog, User, WebAuthnCredential
 from src_back.schemas.user import user_schema
+from src_back.services import passkey_state
 from src_back.services.auth import LAST_METHOD
-from src_back.services.passkeys import (
-    ALREADY_REGISTERED,
-    CHALLENGE_TTL_SECONDS,
-    EXPIRED,
-    NOT_VERIFIED,
-    REGISTER_CHALLENGE_KEY,
-)
+from src_back.services.passkeys import ALREADY_REGISTERED, EXPIRED, NOT_VERIFIED
 from src_back.tests.helpers import persist
 from src_back.tests.software_authenticator import SoftwareAuthenticator
 
@@ -26,6 +21,11 @@ REGISTER_OPTIONS_URL = f'{PASSKEYS_URL}/register/options'
 REGISTER_VERIFY_URL = f'{PASSKEYS_URL}/register/verify'
 LOGIN_OPTIONS_URL = f'{PASSKEYS_URL}/login/options'
 LOGIN_VERIFY_URL = f'{PASSKEYS_URL}/login/verify'
+REGISTER_COOKIE = '__Host-passkey_register'
+LOGIN_COOKIE = '__Host-passkey_login'
+EACH_OPTIONS_URL = pytest.mark.parametrize(
+    'url', [REGISTER_OPTIONS_URL, LOGIN_OPTIONS_URL], ids=['register', 'login']
+)
 
 
 def register(
@@ -59,6 +59,23 @@ def passkey_entry(db: SQLAlchemy) -> AuditLog:
 
 def listed_ids(client: FlaskClient) -> list[int]:
     return [item['id'] for item in client.get(PASSKEYS_URL).get_json()]
+
+
+def set_cookie_headers(response: TestResponse, name: str) -> list[str]:
+    return [
+        header
+        for header in response.headers.getlist('Set-Cookie')
+        if header.startswith(f'{name}=')
+    ]
+
+
+def set_cookie_attributes(response: TestResponse, name: str) -> dict[str, str | None]:
+    [header] = set_cookie_headers(response, name)
+    attributes: dict[str, str | None] = {}
+    for attribute in header.split('; ')[1:]:
+        key, separator, value = attribute.partition('=')
+        attributes[key.lower()] = value if separator else None
+    return attributes
 
 
 # Adding a passkey
@@ -124,13 +141,12 @@ def test_register_verify_trims_the_nickname(
 
 
 def test_register_verify_answers_400_for_an_expired_request(
-    auth_client: FlaskClient, authenticator: SoftwareAuthenticator
+    auth_client: FlaskClient,
+    authenticator: SoftwareAuthenticator,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     options = auth_client.get(REGISTER_OPTIONS_URL).get_json()
-    with auth_client.session_transaction() as flask_session:
-        pending = flask_session[REGISTER_CHALLENGE_KEY]
-        issued_at = pending['issued_at'] - CHALLENGE_TTL_SECONDS - 1
-        flask_session[REGISTER_CHALLENGE_KEY] = {**pending, 'issued_at': issued_at}
+    monkeypatch.setattr(passkey_state, 'CHALLENGE_TTL_SECONDS', -1)
     body = {'credential': authenticator.create(options)}
     response = auth_client.post(REGISTER_VERIFY_URL, json=body)
     assert response.status_code == 400
@@ -265,16 +281,6 @@ def test_login_verify_answers_401_alike(
     assert me_from_the_session_cookie(client).status_code == 401
 
 
-def test_a_spent_answer_is_refused(client: FlaskClient, passwordless_user: User) -> None:
-    # Its counter cannot refuse a replay, so only the spent challenge can.
-    authenticator = SoftwareAuthenticator(counter_step=0)
-    persist(authenticator.credential_for(passwordless_user))
-    options = client.get(LOGIN_OPTIONS_URL).get_json()
-    body = {'credential': authenticator.get(options)}
-    assert client.post(LOGIN_VERIFY_URL, json=body).status_code == 200
-    assert client.post(LOGIN_VERIFY_URL, json=body).status_code == 401
-
-
 def test_login_verify_answers_403_for_a_deactivated_account(
     client: FlaskClient, inactive_user: User, authenticator: SoftwareAuthenticator
 ) -> None:
@@ -292,6 +298,126 @@ def test_login_verify_validates_the_body(
     client: FlaskClient, body: dict[str, Any]
 ) -> None:
     assert client.post(LOGIN_VERIFY_URL, json=body).status_code == 422
+
+
+# The challenge cookies
+
+
+@pytest.mark.parametrize(
+    ('origin', 'prefix', 'path'),
+    [('https://app.test', '__Host-', '/'), ('http://localhost:5174', '', PASSKEYS_URL)],
+    ids=['https', 'http'],
+)
+@pytest.mark.parametrize('kind', ['register', 'login'])
+def test_options_set_their_challenge_cookie(
+    app: Flask,
+    auth_client: FlaskClient,
+    origin: str,
+    prefix: str,
+    path: str,
+    kind: str,
+) -> None:
+    app.config['PUBLIC_BASE_URL'] = origin
+    response = auth_client.get(f'{PASSKEYS_URL}/{kind}/options')
+    assert response.status_code == 200
+    attributes = set_cookie_attributes(response, f'{prefix}passkey_{kind}')
+    assert attributes['path'] == path
+    assert ('secure' in attributes) is origin.startswith('https://')
+    assert 'httponly' in attributes
+    assert attributes['samesite'] == 'Strict'
+    assert attributes['max-age'] == '300'
+
+
+def test_login_options_leave_an_anonymous_session_alone(client: FlaskClient) -> None:
+    response = client.get(LOGIN_OPTIONS_URL)
+    assert response.status_code == 200
+    assert set_cookie_headers(response, LOGIN_COOKIE) != []
+    assert set_cookie_headers(response, 'session') == []
+
+
+@pytest.mark.parametrize(
+    ('first', 'status'),
+    [('the-answer', 200), ('an-unknown-passkey', 401), ('no-credential', 422)],
+)
+def test_every_sign_in_answer_spends_the_challenge(
+    client: FlaskClient, passwordless_user: User, first: str, status: int
+) -> None:
+    # Its counter cannot refuse a replay, so only the cleared cookie can.
+    authenticator = SoftwareAuthenticator(counter_step=0)
+    persist(authenticator.credential_for(passwordless_user))
+    options = client.get(LOGIN_OPTIONS_URL).get_json()
+    bodies: dict[str, dict[str, Any]] = {
+        'the-answer': {'credential': authenticator.get(options)},
+        'an-unknown-passkey': {'credential': SoftwareAuthenticator().get(options)},
+        'no-credential': {},
+    }
+    response = client.post(LOGIN_VERIFY_URL, json=bodies[first])
+    assert response.status_code == status
+    assert set_cookie_attributes(response, LOGIN_COOKIE)['max-age'] == '0'
+    # The answer that signs in, refused once any answer has spent its challenge.
+    assert client.post(LOGIN_VERIFY_URL, json=bodies['the-answer']).status_code == 401
+
+
+@pytest.mark.parametrize(
+    ('first', 'status'),
+    [('the-answer', 201), ('another-origin', 400), ('no-credential', 422)],
+)
+def test_every_registration_answer_spends_the_challenge(
+    auth_client: FlaskClient,
+    authenticator: SoftwareAuthenticator,
+    first: str,
+    status: int,
+) -> None:
+    options = auth_client.get(REGISTER_OPTIONS_URL).get_json()
+    evil = authenticator.create(options, origin='https://evil.test')
+    bodies: dict[str, dict[str, Any]] = {
+        'the-answer': {'credential': authenticator.create(options)},
+        'another-origin': {'credential': evil},
+        'no-credential': {},
+    }
+    response = auth_client.post(REGISTER_VERIFY_URL, json=bodies[first])
+    assert response.status_code == status
+    assert set_cookie_attributes(response, REGISTER_COOKIE)['max-age'] == '0'
+    # The answer that registers, refused once any answer has spent its challenge.
+    again = auth_client.post(REGISTER_VERIFY_URL, json=bodies['the-answer'])
+    assert again.status_code == 400
+    assert again.get_json() == {'error': EXPIRED}
+
+
+@pytest.mark.parametrize('method', ['GET', 'HEAD'])
+@EACH_OPTIONS_URL
+def test_options_need_the_requested_with_header(
+    client: FlaskClient, url: str, method: str
+) -> None:
+    # As a navigation from another site arrives: no header, and no Strict session cookie.
+    client.environ_base.pop('HTTP_X_REQUESTED_WITH')
+    response = client.open(url, method=method)
+    assert response.status_code == 403
+    assert 'Set-Cookie' not in response.headers
+
+
+@EACH_OPTIONS_URL
+def test_an_options_request_needs_no_requested_with_header(
+    client: FlaskClient, url: str
+) -> None:
+    client.environ_base.pop('HTTP_X_REQUESTED_WITH')
+    assert client.options(url).status_code == 200
+
+
+def test_an_options_answer_that_left_before_a_sign_in_keeps_it(
+    client: FlaskClient, user: User
+) -> None:
+    body = {'email': user.email, 'password': 'password123'}
+    assert client.post('/api/v1/auth/login', json=body).status_code == 200
+    signed_in = client.get_cookie('session')
+    assert signed_in is not None
+    # The renewal left before the sign-in answered, so it carried no session cookie.
+    client.delete_cookie('session')
+    assert client.get(LOGIN_OPTIONS_URL).status_code == 200
+    # Its answer lands last: the browser keeps the sign-in's cookie unless it replaces it.
+    late = client.get_cookie('session')
+    client.set_cookie('session', (late or signed_in).value)
+    assert me_from_the_session_cookie(client).status_code == 200
 
 
 # The signed-in account's passkeys

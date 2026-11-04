@@ -20,8 +20,11 @@ below). Sign in with Apple (#30) and Facebook (#31) build on the same groundwork
   account is deactivated.
 - `count_sign_in_methods(user)` counts the ways an account can sign in: a password, each
   linked provider, and each passkey. Code that removes one calls
-  `require_another_sign_in_method(user)` first, which raises `LastSignInMethodError` (409)
-  instead of removing the last.
+  `lock_sign_in_methods(user)` before it looks the method up, then
+  `require_another_sign_in_method(user)`, which raises `LastSignInMethodError` (409)
+  instead of removing the last. The lock holds the account's row until the commit, so on
+  PostgreSQL two removals at once take turns, and the second counts what the first left;
+  SQLite ignores it.
 - Self-registration loads `RegistrationSchema`, which accepts only an email and a
   password: `role` or `is_active` in the body answers 422, so nobody registers as an
   admin. A registered account is an active `user`.
@@ -30,10 +33,11 @@ below). Sign in with Apple (#30) and Facebook (#31) build on the same groundwork
   as Sign in with Apple's `form_post` will (#30), so `oauth.callback` is exempt and checks
   its signed `state` instead.
 
-An account without a password is trusted to own its email address as far as the sign-in
-provider that created it verified the address, and "The linking policy" says how far that
-goes. Any new way to create such an account, such as an invitation or a passkey-first
-sign-up, must verify the address first; otherwise linking a provider by email would hand
+An account without a password got its email address from the sign-in provider that
+created it, which verified the address. No sign-in attaches a provider to an existing
+account by its email unless `AUTO_LINK_BY_EMAIL` is on ("The linking policy"). A project
+that turns it on must also verify the address of every account created another way, such
+as by an invitation or a passkey-first sign-up, or linking a provider by email would hand
 the account to whoever created it.
 
 ## Sign-in providers
@@ -76,7 +80,7 @@ in `src_back/services/oauth_providers.py`.
 | `invalid_token`    | The ID token, or the keys to check it, failed validation      |
 | `email_required`   | The provider gave no email                                    |
 | `email_unverified` | The provider has not verified the email                       |
-| `link_required`    | The email belongs to an account with a password               |
+| `link_required`    | The email belongs to an existing account                      |
 | `already_linked`   | The identity, or the account's slot for it, is already taken  |
 | `account_inactive` | The account has been deactivated or no longer exists          |
 
@@ -124,23 +128,23 @@ provider. A `limit_req` for it needs a location per provider, which is its own i
    says. An account has one link per provider, so a second is `already_linked`.
 3. No email is `email_required`, and an unverified one is `email_unverified`.
 4. A verified email with no account creates one, with no password and the `user` role.
-5. A verified email on an account without a password attaches and signs in: that account's
-   email was itself asserted by a provider that verified it.
-6. A verified email on an account with a password is `link_required`. Registration never
-   verifies an address, so auto-linking would let anyone who registered the victim's
-   address keep a working password to the merged account. Sign in with the password, then
-   link from the Account page. A project that verifies addresses at registration can set
-   `AUTO_LINK_PASSWORD_ACCOUNTS`.
+5. A verified email that belongs to an account, with a password or without, is
+   `link_required`: sign in another way, then link from the Account page. Registration
+   never verifies an address, so attaching to an account with a password would leave
+   whoever registered the victim's address a working password to the merged account. An
+   account without a password can unlink its provider while it keeps a passkey, so
+   attaching to one would let the identity its owner removed attach itself again. A
+   project that verifies addresses at registration, and accepts that an unlink then no
+   longer revokes a provider, can set `AUTO_LINK_BY_EMAIL`.
 
-Rules 4 and 5 take the provider's word. Google warns that `email_verified` records a past
-check: for an address outside `@gmail.com` and Google Workspace, "ownership of the third
-party email account may have since changed", and it recommends another challenge
+Rule 4 takes the provider's word. Google warns that `email_verified` records a past check:
+for an address outside `@gmail.com` and Google Workspace, "ownership of the third party
+email account may have since changed", and it recommends another challenge
 ([Google](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token)).
 So rule 4 can create an account for a stale address, and the real owner's registration
-then answers 409, which is no worse than anyone registering that address today. Rule 5
-cannot fire while Google is the only provider, because every account without a password
-already holds its Google link. Decide it when adding a second provider: dropping rule 5,
-so that every existing account answers `link_required`, needs nothing stored beforehand.
+then answers 409, which is no worse than anyone registering that address today. Under
+rule 5, an account one provider created answers `link_required` to a second provider's
+sign-in (#30, #31) until its owner links that provider from the Account page.
 
 Link mode needs that same-origin request as well as the session, so another site cannot
 start it, and a stale session cannot turn a sign-in into a link. Every link and unlink is
@@ -239,22 +243,33 @@ as secure over plain http.
 
 ### Challenges
 
-A ceremony's challenge waits in the Flask session for five minutes
-(`CHALLENGE_TTL_SECONDS`), under `passkey_register` or `passkey_login`, and the answer
-takes it out, so one answer spends it. The session works here because every passkey call
-is a same-site request, which carries the `SameSite=Strict` cookie. A registration
-challenge also names its account, so an answer that arrives after another account signed
-in on the same browser is refused. A second sign-in tab replaces the first tab's
-challenge, so a passkey picked in the first fails once. A browser's autofill request never
-times out, so the sign-in page renews its offer every four minutes, before the challenge
-expires.
+A ceremony's challenge waits five minutes (`CHALLENGE_TTL_SECONDS`) in a signed cookie of
+its own, which `src_back/services/passkey_state.py` writes: `__Host-passkey_register` or
+`__Host-passkey_login`, `HttpOnly`, `Secure`, and `SameSite=Strict`, or, over plain http,
+`passkey_register` or `passkey_login` under `/api/v1/auth/passkeys`. The options GET sets
+it, and every answer from the verify POST clears it, so one answer spends it. A
+registration challenge also names its account, so an answer that arrives after another
+account signed in on the same browser is refused.
 
-Flask's session is a signed cookie, not a server-side store, so whoever holds both a
-browser's session cookie and an answer it just sent could replay the answer until the
-challenge expires. The counter stops that for authenticators that count, but synced
-passkeys always report 0. Both halves leave the browser only over TLS. A server-side
-record of spent challenges, such as a table a scheduled job sweeps, would close the gap;
-the session costs no write per sign-in.
+The challenge stays out of the Flask session on purpose. An options answer that rewrote
+the session cookie could land after a sign-in that finished while it was in flight, and
+sign the visitor out; a navigation from another site, which arrives without the
+`SameSite=Strict` session cookie, would have replaced the session with one holding only
+the challenge. The two options GETs also require `X-Requested-With`
+(`ai/conventions.md`), so another site cannot replace a challenge by navigation, and the
+sign-in page sends its options and verify requests one at a time, so the newest answer
+always lands last.
+
+A second sign-in tab replaces the first tab's challenge, so a passkey picked in the first
+fails once. A browser's autofill request never times out, so the sign-in page renews its
+offer every four minutes, before the challenge expires.
+
+The cookie is signed, not stored, so whoever holds both a browser's challenge cookie and
+an answer it just sent could replay the answer until the challenge expires. The counter
+stops that for authenticators that count, but synced passkeys always report 0. Both
+halves leave the browser only over TLS. A server-side record of spent challenges, such as
+a table a scheduled job sweeps, would close the gap; the cookie costs no write per
+sign-in.
 
 ### Lost passkeys and compromised accounts
 

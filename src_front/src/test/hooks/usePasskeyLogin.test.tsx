@@ -57,6 +57,9 @@ function deferred<T>() {
     return { promise, resolve, reject }
 }
 
+/** Sign-in options that load, or fail to, only when the test says. */
+type HeldOptions = ReturnType<typeof deferred<PublicKeyCredentialRequestOptionsJSON>>
+
 /** A prompt the visitor never answers. */
 const unanswered = <T,>() => new Promise<T>(() => undefined)
 
@@ -218,8 +221,8 @@ describe('usePasskeyLogin', () => {
         await waitFor(() => expect(loginVerify).toHaveBeenCalledTimes(1))
         await settle()
 
-        // A renewal now would send the signed-out session cookie, and its answer could
-        // land after the sign-in's and replace the signed-in one.
+        // Options asked for now could be answered before the sign-in is, and the
+        // sign-in's answer clears the cookie that holds their challenge.
         expect(loginOptions).toHaveBeenCalledTimes(1)
         await act(async () => answer.resolve(verified))
         await waitFor(() => expect(loginOptions).toHaveBeenCalledTimes(2))
@@ -291,6 +294,38 @@ describe('usePasskeyLogin', () => {
         await settle()
 
         expect(startAuthentication).not.toHaveBeenCalled()
+    })
+
+    it('opens no prompt when unmounted while the button options load', async () => {
+        const options = deferred<PublicKeyCredentialRequestOptionsJSON>()
+        vi.mocked(loginOptions).mockReturnValue(options.promise)
+        const { run, settled } = recordingRun()
+        const { result, unmount } = renderPasskeyLogin(run)
+        clickPasskeyButton(result.current.signIn)
+        await waitFor(() => expect(loginOptions).toHaveBeenCalledTimes(1))
+
+        unmount()
+        options.resolve(requestOptions)
+        await settle()
+
+        expect(startAuthentication).not.toHaveBeenCalled()
+        expect(settled).toEqual([{ resolved: null }])
+    })
+
+    it('verifies nothing when unmounted after the button prompt answers', async () => {
+        const prompt = deferred<AuthenticationResponseJSON>()
+        vi.mocked(startAuthentication).mockReturnValue(prompt.promise)
+        const { run, settled } = recordingRun()
+        const { result, unmount } = renderPasskeyLogin(run)
+        clickPasskeyButton(result.current.signIn)
+        await waitFor(() => expect(startAuthentication).toHaveBeenCalledTimes(1))
+
+        prompt.resolve(authenticationResponse)
+        unmount()
+        await settle()
+
+        expect(loginVerify).not.toHaveBeenCalled()
+        expect(settled).toEqual([{ resolved: null }])
     })
 
     it('signs in through the prompt, pending until it settles', async () => {
@@ -366,20 +401,55 @@ describe('usePasskeyLogin', () => {
         await waitFor(() => expect(startAuthentication).toHaveBeenCalledTimes(2))
     })
 
-    it('lets a click end an offer whose options are still loading', async () => {
-        const autofillOptions = deferred<PublicKeyCredentialRequestOptionsJSON>()
+    it.each([
+        ['load', (options: HeldOptions) => options.resolve(requestOptions)],
+        ['fail', (options: HeldOptions) => options.reject(new Error('Network Error'))],
+    ])(
+        'asks for the button options only once the autofill options %s',
+        async (_label, finishAutofillOptions) => {
+            const autofillOptions = deferred<PublicKeyCredentialRequestOptionsJSON>()
+            vi.mocked(browserSupportsWebAuthnAutofill).mockResolvedValue(true)
+            vi.mocked(loginOptions).mockReturnValueOnce(autofillOptions.promise)
+            const { result } = renderPasskeyLogin(recordingRun().run)
+            await waitFor(() => expect(loginOptions).toHaveBeenCalledTimes(1))
+
+            clickPasskeyButton(result.current.signIn)
+            await settle()
+            expect(loginOptions).toHaveBeenCalledTimes(1)
+
+            finishAutofillOptions(autofillOptions)
+            await waitFor(() => expect(startAuthentication).toHaveBeenCalledTimes(1))
+            await settle()
+
+            expect(loginOptions).toHaveBeenCalledTimes(2)
+            // A late autofill ceremony would abort the button's prompt.
+            expect(ceremonies()).toStrictEqual([{ optionsJSON: requestOptions }])
+        },
+    )
+
+    it('verifies nothing for a passkey picked once a click ended the offer', async () => {
+        const autofillAnswer = deferred<AuthenticationResponseJSON>()
+        const buttonOptions = deferred<PublicKeyCredentialRequestOptionsJSON>()
         vi.mocked(browserSupportsWebAuthnAutofill).mockResolvedValue(true)
-        vi.mocked(loginOptions).mockReturnValueOnce(autofillOptions.promise)
-        const { result } = renderPasskeyLogin(recordingRun().run)
-        await waitFor(() => expect(loginOptions).toHaveBeenCalledTimes(1))
-
-        clickPasskeyButton(result.current.signIn)
+        vi.mocked(startAuthentication)
+            .mockReturnValueOnce(autofillAnswer.promise)
+            .mockResolvedValueOnce(authenticationResponse)
+        const { run, settled } = recordingRun()
+        const { result } = renderPasskeyLogin(run)
         await waitFor(() => expect(startAuthentication).toHaveBeenCalledTimes(1))
-        autofillOptions.resolve(requestOptions)
-        await settle()
 
-        // A late autofill ceremony would abort the button's prompt.
-        expect(ceremonies()).toStrictEqual([{ optionsJSON: requestOptions }])
+        vi.mocked(loginOptions).mockReturnValueOnce(buttonOptions.promise)
+        clickPasskeyButton(result.current.signIn)
+        // The browser keeps its suggestions until the button's prompt replaces them.
+        autofillAnswer.resolve(authenticationResponse)
+        await settle()
+        expect(run).toHaveBeenCalledTimes(1)
+
+        buttonOptions.resolve(requestOptions)
+        await waitFor(() => expect(settled).toEqual([{ resolved: verified }]))
+        await settle()
+        expect(run).toHaveBeenCalledTimes(1)
+        expect(loginVerify).toHaveBeenCalledTimes(1)
     })
 
     describe('on a fake clock', () => {
@@ -459,5 +529,38 @@ describe('usePasskeyLogin', () => {
                 { optionsJSON: requestOptions, useBrowserAutofill: true },
             ])
         })
+
+        it.each([
+            ['a click', clickPasskeyButton, { optionsJSON: requestOptions }],
+            [
+                'the four-minute renewal',
+                () => advance(FOUR_MINUTES),
+                { optionsJSON: requestOptions, useBrowserAutofill: true },
+            ],
+        ])(
+            'asks for no options on %s until a picked passkey has verified',
+            async (_label, trigger, nextCeremony) => {
+                const answer = deferred<AxiosResponse<AuthUser>>()
+                vi.mocked(startAuthentication).mockResolvedValueOnce(
+                    authenticationResponse,
+                )
+                vi.mocked(loginVerify).mockReturnValue(answer.promise)
+                const { result } = renderPasskeyLogin(recordingRun().run)
+                await flush()
+                expect(loginVerify).toHaveBeenCalledTimes(1)
+
+                await trigger(result.current.signIn)
+                await flush()
+                expect(loginOptions).toHaveBeenCalledTimes(1)
+
+                await act(async () => answer.resolve(verified))
+                await flush()
+                expect(loginOptions).toHaveBeenCalledTimes(2)
+                expect(ceremonies()).toEqual([
+                    { optionsJSON: requestOptions, useBrowserAutofill: true },
+                    nextCeremony,
+                ])
+            },
+        )
     })
 })

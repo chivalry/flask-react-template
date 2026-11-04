@@ -3054,6 +3054,283 @@ The browser check also showed:
   space, still runs past its row at 375 px, under the Edit icon and 1 px beyond the
   viewport. `EntityList` has no wrap rule for row text, which predates this change.
 
+## Review follow-up
+
+The review posted on PR #59 on 2026-11-03 found one P1 and four P2 defects in `e886351`,
+and each reproduced on a scratch copy. On 2026-11-03 Chuck chose to fix all five before
+merge with the four changes below. Two of them reverse decisions the issue locked: rule 5
+of the linking policy, and challenges kept in the Flask session.
+
+1. **[P1] An unlinked provider relinked itself.** A passwordless Google account with a
+   passkey could unlink Google (204), and the next sign-in through that identity landed on
+   `/` with the link recreated: rule 5 attaches a verified email to any account without a
+   password. `ai/auth.md` relied on rule 5 never firing while every passwordless account
+   held its Google link, which counting passkeys ended.
+2. **[P2] A cross-site navigation signed the visitor out.** A GET of `/login/options`
+   without the Strict session cookie answered 200 and set a new session holding only the
+   challenge, and the cookie specification lets a top-level navigation store a cookie of
+   any `SameSite` value.
+3. **[P2] A late options answer won the cookie.** Two requests that leave with the same
+   cookie jar each answer with a whole session, and the browser keeps the last. The
+   button's valid answer was refused (401) under the autofill's late cookie, and a
+   password sign-in was signed out (`/me` 401) by an options answer that left before it.
+4. **[P2] Overlapping deletes left no way in.** Two deletes that both passed
+   `require_another_sign_in_method` before either committed both succeeded, leaving zero
+   sign-in methods. Unlinking Google while deleting a passkey races the same way.
+5. **[P2] The button's prompt opened after the page was gone.** `signInThroughPrompt`
+   checked nothing after `await loginOptions()`, so `startAuthentication` ran after Login
+   unmounted.
+
+### Change 1: drop rule 5
+
+In `src_back/services/oauth.py`, `AUTO_LINK_PASSWORD_ACCOUNTS` becomes
+`AUTO_LINK_BY_EMAIL = False`, and `_resolve_by_email` refuses every existing account
+unless it is on:
+
+```python
+    user = find_user_by_email(identity.email)
+    if user is None:
+        return _create_user(identity.email, identity)
+    if not AUTO_LINK_BY_EMAIL:
+        raise OAuthError('link_required')
+    return _attach_account(user, identity)
+```
+
+The constant's docstring says why both kinds of account are refused: registration never
+verifies an address, so attaching to an account with a password would leave whoever
+registered the victim's email a working password; and an account a provider created can
+drop that provider while a passkey remains, so attaching to one without a password would
+let a removed identity attach itself again. A project that verifies addresses at
+registration, and accepts that an unlink then no longer revokes a provider, can turn it
+on. `_resolve_by_email`'s docstring and its `Raises` entry for `link_required` follow.
+
+Tests in `test_oauth_api.py`:
+
+- `test_callback_attaches_to_a_passwordless_account` becomes
+  `test_callback_never_attaches_to_a_passwordless_account`: `/login?error=link_required`,
+  no link, no session.
+- `test_a_second_identity_cannot_attach_by_email` and
+  `test_a_deactivated_passwordless_account_gains_no_link` now expect `link_required`.
+- `test_the_constant_relaxes_that_refusal` patches `AUTO_LINK_BY_EMAIL` and is
+  parametrized over an account with a password and one without; each is attached.
+- New `test_an_unlinked_provider_cannot_relink_itself`, the review's reproduction:
+  `linked_user` with a persisted passkey signs in through Google and unlinks it (204);
+  after logout, a sign-in through the same identity lands on `/login?error=link_required`,
+  with no link and `/me` answering 401.
+
+### Change 2: a challenge cookie of its own
+
+A new `src_back/services/passkey_state.py`, modelled on `oauth_state.py`, holds the
+challenge outside the Flask session, so an options answer never rewrites the session
+cookie. `CHALLENGE_TTL_SECONDS` moves there, and `services/passkeys.py` imports it.
+
+- `new_challenge_token(kind, challenge, *, user_id) -> str` signs
+  `{'challenge': <base64url>, 'user_id': ...}` with a `URLSafeTimedSerializer` keyed on
+  `SECRET_KEY`, salted `passkey-<kind>`, so a sign-in token never passes as a registration
+  one.
+- `challenge_from_token(kind, token, *, user_id) -> bytes | None` gives `None` for a
+  missing token, a bad signature, an age past `CHALLENGE_TTL_SECONDS`, another kind,
+  another account, or a payload that is not that shape.
+- `set_challenge_cookie(response, kind, token)`, `read_challenge_cookie(kind)`, and
+  `clear_challenge_cookie(response, kind)`, which returns the response, so that
+  `after_this_request` can take it. Over https the cookie is
+  `__Host-passkey_<kind>`, with `Secure` and `Path=/`; over http it is
+  `passkey_<kind>`, with `Path=/api/v1/auth/passkeys`. Both are `HttpOnly` and
+  `SameSite=Strict`, and live `CHALLENGE_TTL_SECONDS`. The kinds are `register` and
+  `login`. Its `_uses_https()` decides the scheme as `oauth_state.py`'s does.
+
+In `services/passkeys.py`, `_store_challenge`, `_take_challenge`, and the two session keys
+go. `registration_options` and `authentication_options` return `(options_json, token)`,
+and `verify_registration` and `verify_authentication` take the token as a last argument
+and refuse when `challenge_from_token` gives `None`, as they refused a missing challenge.
+The service keeps no challenge, so it no longer spends one; the routes do. The options
+routes set the cookie on their answer, and each verify route registers
+`after_this_request` before anything else, so every answer it gives, whether a success, a
+refusal, or a 422, clears its cookie.
+
+In `src_back/app.py`, `_SPA_ONLY_GET_ENDPOINTS = frozenset({'passkeys.login_options',
+'passkeys.register_options'})` brings the two options routes under the `X-Requested-With`
+hook for `GET` and `HEAD`, so another site cannot reach one by navigation. `OPTIONS`
+stays exempt, as it is for the mutating routes, and the SPA's axios client already sends
+the header on every request.
+
+In `src_front/src/hooks/usePasskeyLogin.ts`, every request that sets or clears the sign-in
+cookie, an options GET or a verify POST from the button or the autofill, goes through
+`sendAfterEarlierRequests(pending, send)`. It chains the request behind the one in
+`pending`, a ref, ignoring that one's failure, so the hook never has two such requests in
+flight, and the newest one's answer always lands last. Without it, the autofill's options
+answer could replace the button's challenge, and a picked passkey's verify answer could
+clear the challenge of an offer that a renewal started meanwhile.
+
+Tests:
+
+- New `test_passkey_state.py`: a round trip per kind; a token of either kind refused as
+  the other with the same account argument, which only the salt tells apart; another
+  account's token; an expired token, with `CHALLENGE_TTL_SECONDS` patched below zero; a
+  bad signature; a missing token; payloads of another shape; the cookie's attributes over
+  https and over http; and a clear that matches the name and path.
+- `test_passkeys.py`: the `register` and `sign_in` helpers thread the token, and the
+  challenge tests read it with `challenge_from_token` instead of the session. The two
+  spend tests move to `test_passkeys_api.py`, since the routes now spend a challenge.
+- `test_passkeys_api.py`:
+    - both options GETs set their cookie with the attributes above, and an anonymous
+      options GET sets no session cookie;
+    - each verify answer clears it, after a success, a refusal, and a 422, so the same
+      answer posted again is refused: 401 for a sign-in, and 400 `EXPIRED` for a
+      registration;
+    - an options GET or HEAD without `X-Requested-With` answers 403 and sets no cookie,
+      and an `OPTIONS` request without it is not refused;
+    - an options answer that left before a password sign-in no longer signs it out.
+- `usePasskeyLogin.test.tsx`:
+    - with the autofill's options held open, a click asks for no options until they
+      settle, then asks once and opens the prompt without `useBrowserAutofill`, and the
+      same when they fail;
+    - with a picked passkey's verify held open, neither a click nor the four-minute
+      renewal asks for options until it settles.
+
+### Change 3: lock the account while a method goes
+
+In `src_back/services/auth.py`, a new `lock_sign_in_methods(user)` takes the account's
+row lock and reloads its methods:
+
+```python
+    db.session.query(User).filter_by(id=user.id).with_for_update().one()
+    db.session.expire(user, ['oauth_accounts', 'passkeys'])
+```
+
+PostgreSQL makes a second removal wait until the first commits, so its reloaded count sees
+the first one's deletion; SQLite ignores the lock, and production runs PostgreSQL.
+`delete_passkey` and `unlink_account` call it first, then look the method up, then call
+`require_another_sign_in_method`, whose docstring says so.
+
+Tests: PostgreSQL-only tests in `test_auth.py`, beside the count's tests and skipped on
+other databases, force the interleaving. Each thread pushes its own application context,
+so each has its own connection, and reads the account's methods before calling the
+remover, as a request that showed them first would, so the reload is tested too. Thread
+A runs a removal and waits on an event once `require_another_sign_in_method` passes;
+thread B then runs a second removal, which must still be running a second later, because
+it waits on A's lock. Once A is released, both finish. The cases:
+
+1. A passwordless account with two passkeys, each thread deleting one: A returns `True`,
+   B raises `LastSignInMethodError`, and one passkey remains.
+2. `linked_user` with one passkey, A unlinking Google and B deleting the passkey: A
+   returns `True`, and B raises `LastSignInMethodError`.
+3. The same account, A deleting the passkey and B unlinking Google: the same results.
+4. `linked_user` with two passkeys, both threads deleting the same passkey, and again
+   both unlinking Google: A returns `True` and B `False`, which only a lock taken before
+   the lookup gives. A lookup made before the lock finds the method A removed, and
+   removing it fails.
+
+Without the lock, B finishes while A waits, and the account loses its last way in, or, in
+case 4, A fails on the row B deleted.
+
+### Change 4: cancel the button's sign-in between its steps
+
+The button's sign-in gets its own `AbortController`, kept in a ref that also replaces
+`buttonBusyRef`. Unmounting aborts it as well as cancelling the ceremony, and
+`signInThroughPrompt(signal)` returns `null` once the options load and again once the
+prompt answers, before verifying. To keep `usePasskeyLogin` under 50 lines, the autofill
+effect's body moves into a module function, `startAutofillOffer(refs, renew)`, which
+returns the cleanup.
+
+Tests in `usePasskeyLogin.test.tsx`: unmounting while the button's options load starts no
+ceremony, and unmounting after its prompt answers verifies nothing.
+
+### Documentation
+
+- `ai/auth.md`:
+    - The linking policy's rules 5 and 6 become one rule, every existing account answers
+      `link_required`, with the reasons above.
+    - The paragraph that says rule 5 cannot fire goes.
+    - The Overview's paragraph on accounts without a password now says linking by email
+      happens only where `AUTO_LINK_BY_EMAIL` is on.
+    - The Passkeys section's "Challenges" describes the cookie, its attributes, the
+      header on the options GETs, and the replay limit, which is unchanged.
+- `ai/conventions.md`: the `X-Requested-With` bullet names the two options GETs and
+  `_SPA_ONLY_GET_ENDPOINTS`.
+- `ai/project.md`: the services line names `passkey_state.py`.
+- The Accepted limits above still hold, except that the challenge now waits in its own
+  cookie rather than the session.
+
+### Mutation checks for the follow-up
+
+1. Rule 5 restored, or the `AUTO_LINK_BY_EMAIL` check dropped: the relink and the
+   passwordless-account tests.
+2. One salt for both kinds; the account check dropped; the age check dropped: the token
+   tests.
+3. The cookie's `SameSite` set to `Lax`, or its path widened over http: the attribute
+   tests.
+4. A verify route that does not clear its cookie, or clears it only on success: the
+   clear tests.
+5. The options GETs left out of `_SPA_ONLY_GET_ENDPOINTS`, `HEAD` left out, or the
+   check applied to `OPTIONS` too: the header tests.
+6. `lock_sign_in_methods` removed from `delete_passkey` or from `unlink_account`, or its
+   `with_for_update()` or its `expire` dropped: the PostgreSQL race tests. The lock
+   called after the lookup: case 4.
+7. `sendAfterEarlierRequests` sending at once, or the autofill's options, a pick's
+   verify, or the button's options bypassing it: the serialization tests. The button's
+   verify bypassing it is equivalent, because the next offer starts only once the
+   button's sign-in settles, and an ended offer verifies no late pick.
+8. Either `signal.aborted` check in `signInThroughPrompt` dropped, or the unmount not
+   aborting the button: the unmount tests.
+
+### Verification for the follow-up
+
+The same steps as below: targeted tests, then `npm run test`, both lints, the type check,
+Prettier, fallow, and markdownlint. The PostgreSQL run is the only one that exercises the
+race test. Then a production-build check in Chrome: a passkey sign-in through the button
+and through the autofill, adding, renaming, and deleting a passkey, a password sign-in
+that stays signed in, and the challenge cookie's name and attributes over plain http.
+
+### Settled while implementing the follow-up
+
+Two guards came out of the mutation checks, and Chuck took both on 2026-11-03, declining
+the two I advised against: one for the order of the cookie clear and the passkeys-off
+404, which no options answer can make matter, and one for the pick's renewal check, which
+predates the follow-up.
+
+- **A late pick verifies nothing.** The button aborts the offer's signal, but the
+  browser keeps its suggestions until the button's prompt replaces them, so a passkey
+  picked in between still verified. Its answer carried the challenge the button's
+  options had replaced, so it was refused and cleared the cookie, and the button's
+  sign-in then failed too. `offerAutofill` returns `false` when its signal is aborted
+  once the ceremony answers, and `verifies nothing for a passkey picked once a click
+  ended the offer` fails without it. `sendAfterEarlierRequests` also calls `send()` with
+  no arguments, so a request function never receives the earlier answer.
+- **Two unlinks at once.** With `unlink_account` locking after its lookup, two unlinks of
+  Google gave a 500 (`ValueError`) where the second should be `False`, and no test saw
+  it, so case 4 of the race tests runs for a provider as well as a passkey.
+
+The rest, as built:
+
+- `verify_registration` took the token as a fifth parameter, which put it over 50 lines,
+  so py_webauthn's checks moved into `_check_registration`, unchanged.
+- The spend tests post the ceremony's valid answer after a refusal or a 422, because a
+  refused answer is refused again whether or not the cookie was cleared. The old spend
+  tests fold into the success cases.
+- A challenge token's payload must be exactly `challenge` and `user_id`, with base64url
+  text for the challenge.
+- The clear covers the verify routes' own answers. The 401 from `@login_required` and the
+  header hook's 403 come before the route body and leave the cookie to expire, and
+  logout no longer drops a pending challenge, as its `session.clear()` did. Nothing
+  follows from either: a registration token names its account, and a sign-in token
+  names none.
+- `test_a_deactivated_passwordless_account_gains_no_link` expects `link_required`, which
+  rule 5 now decides before the account's inactive state.
+- The hook's ref is `pendingRequestRef`, since `pending` is already its returned state.
+  The test `lets a click end an offer whose options are still loading` waited for the
+  button's prompt before releasing the autofill's options, which ordering forbids, so the
+  load and fail cases of the ordering test replace it.
+- A queued options GET still goes out after an unmount or an abort, once the request
+  ahead of it settles; nothing reads its answer, which only sets a challenge cookie.
+- After a sign-in succeeds, the renewal that follows a pick or the button can start before
+  the navigation unmounts the sign-in page, so one more options GET leaves a sign-in
+  challenge cookie for its five minutes. The browser check saw it in one run of five, and
+  nothing reads that cookie. Renewing only after a failed pick would end it, and would
+  change what `signs a pick in through the latest run` expects.
+- The React Compiler skips `usePasskeyLogin`, before and after the follow-up, because
+  `signIn` has a `try` and `finally` without a `catch`, so production runs it as written.
+
 ## Verification
 
 1. While editing, targeted runs only:

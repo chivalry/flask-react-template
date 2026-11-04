@@ -18,6 +18,7 @@ from src_back.services.audit_log import AuditTrail
 from src_back.services.auth import (
     USER_AUDIT_TRAIL,
     find_user_by_email,
+    lock_sign_in_methods,
     require_another_sign_in_method,
 )
 from src_back.services.errors import InactiveAccountError, OAuthError
@@ -30,13 +31,16 @@ _log = logging.getLogger(__name__)
 _DISPLAY_NAME_LENGTH = 255
 """The length of ``oauth_accounts.display_name``; a longer name is cut to fit."""
 
-AUTO_LINK_PASSWORD_ACCOUNTS = False
-"""Whether a provider's verified email may attach to an account that has a password.
+AUTO_LINK_BY_EMAIL = False
+"""Whether a provider's verified email may attach to an existing account.
 
-Registration never verifies an address, so anyone can register a victim's email with a
-password and wait. Linking the victim's provider account to it would leave them holding
-a working password to the merged account. A project that verifies addresses at
-registration can turn this on.
+Off, every existing account is refused, with a password or without. Registration never
+verifies an address, so anyone can register a victim's email with a password and wait,
+and attaching the victim's provider account would leave them a working password to the
+merged account. An account a provider created can drop that provider while a passkey
+remains, and attaching to an account without a password would let the removed identity
+attach itself again. A project that verifies addresses at registration, and accepts that
+an unlink then no longer revokes a provider, can turn this on.
 """
 
 # Each link and unlink changes how an account can sign in. Only admins may read these
@@ -186,11 +190,11 @@ def _create_user(email: str, identity: OAuthIdentity) -> User:
 
 
 def _resolve_by_email(identity: OAuthIdentity) -> User:
-    """Sign in or create an account from a verified email.
+    """Create an account from a verified email, or refuse one that an account holds.
 
-    An account with a password is never attached to, unless
-    :data:`AUTO_LINK_PASSWORD_ACCOUNTS` says so. One without a password got its email
-    from a provider that verified it (``ai/auth.md``).
+    An existing account, with a password or without, is attached to only when
+    :data:`AUTO_LINK_BY_EMAIL` says so. Otherwise its owner signs in another way and links
+    the provider from the Account page (``ai/auth.md``).
 
     Args:
         identity: The identity the provider asserted, which matches no link.
@@ -201,7 +205,7 @@ def _resolve_by_email(identity: OAuthIdentity) -> User:
     Raises:
         OAuthError: With ``email_required`` if the provider gave no email,
             ``email_unverified`` if it did not verify it, and ``link_required`` if it
-            belongs to an account with a password.
+            belongs to an existing account.
     """
     if not identity.email:
         raise OAuthError('email_required')
@@ -210,7 +214,7 @@ def _resolve_by_email(identity: OAuthIdentity) -> User:
     user = find_user_by_email(identity.email)
     if user is None:
         return _create_user(identity.email, identity)
-    if user.has_password and not AUTO_LINK_PASSWORD_ACCOUNTS:
+    if not AUTO_LINK_BY_EMAIL:
         raise OAuthError('link_required')
     return _attach_account(user, identity)
 
@@ -289,6 +293,8 @@ def list_accounts(user: User) -> list[OAuthAccount]:
 def unlink_account(user: User, provider: str) -> bool:
     """Remove an account's link to a provider, unless it is the last way to sign in.
 
+    :func:`~src_back.services.auth.lock_sign_in_methods` comes first, so a removal that
+    overlaps this one finishes before the link is looked up and the methods counted, and
     :func:`~src_back.services.auth.require_another_sign_in_method` refuses the last one.
 
     Args:
@@ -298,6 +304,7 @@ def unlink_account(user: User, provider: str) -> bool:
     Returns:
         ``True`` once the link is gone, ``False`` if there was none.
     """
+    lock_sign_in_methods(user)
     account = next(
         (link for link in user.oauth_accounts if link.provider == provider), None
     )

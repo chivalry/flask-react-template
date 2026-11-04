@@ -22,7 +22,8 @@ that every contributor and agent follows.
       `services/errors.py` the exceptions services raise, `services/audit_log.py` the
       audit trail and the history queries, `services/oauth.py`, `oauth_providers.py`,
       `oauth_state.py`, and `oidc.py` sign-in through a provider, `services/passkeys.py`
-      the passkey ceremonies and their upkeep, and `services/users.py` the admin's account
+      the passkey ceremonies and their upkeep, `services/passkey_state.py` the cookie
+      that holds a ceremony's challenge, and `services/users.py` the admin's account
       management
     - `tests/` - pytest; one `test_<module>.py` per module; `helpers.py` holds
       `persist()`, and `software_authenticator.py` a software passkey

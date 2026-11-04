@@ -7,13 +7,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from flask import Flask, session
+from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from webauthn.helpers import bytes_to_base64url, encode_cbor
 
 from src_back.models import AuditAction, AuditLog, User, WebAuthnCredential
+from src_back.services import passkey_state
 from src_back.services import passkeys as passkey_service
 from src_back.services.audit_log import audited_tables
 from src_back.services.auth import LAST_METHOD
@@ -22,13 +23,11 @@ from src_back.services.errors import (
     LastSignInMethodError,
     PasskeyError,
 )
+from src_back.services.passkey_state import challenge_from_token
 from src_back.services.passkeys import (
     ALREADY_REGISTERED,
-    CHALLENGE_TTL_SECONDS,
     EXPIRED,
-    LOGIN_CHALLENGE_KEY,
     NOT_VERIFIED,
-    REGISTER_CHALLENGE_KEY,
     RelyingParty,
     authentication_options,
     delete_passkey,
@@ -69,18 +68,31 @@ def rp(app: Flask) -> Iterator[RelyingParty]:
         yield relying_party
 
 
+def begin_registration(user: User, rp: RelyingParty) -> tuple[dict[str, Any], str]:
+    # The options, and the token the route would set as the registration cookie.
+    options_json, token = registration_options(user, rp)
+    return json.loads(options_json), token
+
+
+def begin_sign_in(rp: RelyingParty) -> tuple[dict[str, Any], str]:
+    # The options, and the token the route would set as the sign-in cookie.
+    options_json, token = authentication_options(rp)
+    return json.loads(options_json), token
+
+
 def register(
     user: User, rp: RelyingParty, authenticator: SoftwareAuthenticator, **answer: Any
 ) -> WebAuthnCredential:
-    options = json.loads(registration_options(user, rp))
-    return verify_registration(user, rp, authenticator.create(options, **answer), None)
+    options, token = begin_registration(user, rp)
+    answered = authenticator.create(options, **answer)
+    return verify_registration(user, rp, answered, None, token)
 
 
 def sign_in(
     rp: RelyingParty, authenticator: SoftwareAuthenticator, **answer: Any
 ) -> User | None:
-    options = json.loads(authentication_options(rp))
-    return verify_authentication(rp, authenticator.get(options, **answer))
+    options, token = begin_sign_in(rp)
+    return verify_authentication(rp, authenticator.get(options, **answer), token)
 
 
 def committed_passkeys(db: SQLAlchemy) -> list[WebAuthnCredential]:
@@ -170,7 +182,7 @@ def test_rp_settings_are_off_for_a_url_that_does_not_parse(
 def test_registration_options_ask_for_a_discoverable_passkey(
     user: User, rp: RelyingParty
 ) -> None:
-    options = json.loads(registration_options(user, rp))
+    options, token = begin_registration(user, rp)
     assert options['rp'] == {'id': 'app.test', 'name': rp.name}
     assert options['user'] == {
         'id': bytes_to_base64url(user.uuid.encode()),
@@ -185,15 +197,16 @@ def test_registration_options_ask_for_a_discoverable_passkey(
     assert options['timeout'] == 300000
     assert options['attestation'] == 'none'
     assert options['excludeCredentials'] == []
-    pending = session[REGISTER_CHALLENGE_KEY]
-    assert pending['challenge'] == options['challenge']
-    assert pending['user_id'] == user.id
+    # The token carries the options' challenge, issued to this account.
+    challenge = challenge_from_token('register', token, user_id=user.id)
+    assert challenge is not None
+    assert bytes_to_base64url(challenge) == options['challenge']
 
 
 def test_registration_options_exclude_the_accounts_passkeys(
     passkey_user: User, rp: RelyingParty, authenticator: SoftwareAuthenticator
 ) -> None:
-    options = json.loads(registration_options(passkey_user, rp))
+    options, _ = begin_registration(passkey_user, rp)
     assert options['excludeCredentials'] == [
         {
             'id': bytes_to_base64url(authenticator.credential_id),
@@ -209,7 +222,7 @@ def test_registration_options_skip_a_transport_py_webauthn_no_longer_knows(
     passkey = authenticator.credential_for(user)
     passkey.transports = 'internal,teleport'
     persist(passkey)
-    options = json.loads(registration_options(user, rp))
+    options, _ = begin_registration(user, rp)
     assert options['excludeCredentials'] == [
         {
             'id': bytes_to_base64url(authenticator.credential_id),
@@ -225,8 +238,8 @@ def test_registration_options_skip_a_transport_py_webauthn_no_longer_knows(
 def test_verify_registration_saves_every_field(
     db: SQLAlchemy, user: User, rp: RelyingParty, authenticator: SoftwareAuthenticator
 ) -> None:
-    options = json.loads(registration_options(user, rp))
-    verify_registration(user, rp, authenticator.create(options), 'Laptop')
+    options, token = begin_registration(user, rp)
+    verify_registration(user, rp, authenticator.create(options), 'Laptop', token)
     [saved] = committed_passkeys(db)
     assert saved.credential_id == authenticator.credential_id
     assert saved.public_key == authenticator.cose_public_key()
@@ -312,20 +325,23 @@ def test_verify_registration_keeps_known_transports_once(
     assert [passkey.transports for passkey in committed_passkeys(db)] == [saved]
 
 
-def test_verify_registration_needs_a_waiting_challenge(
+def test_verify_registration_needs_a_challenge_token(
     user: User, rp: RelyingParty
 ) -> None:
     with pytest.raises(PasskeyError, match=EXPIRED):
-        verify_registration(user, rp, {}, None)
+        verify_registration(user, rp, {}, None, None)
 
 
 def test_verify_registration_refuses_an_expired_challenge(
-    user: User, rp: RelyingParty, authenticator: SoftwareAuthenticator
+    user: User,
+    rp: RelyingParty,
+    authenticator: SoftwareAuthenticator,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    options = json.loads(registration_options(user, rp))
-    session[REGISTER_CHALLENGE_KEY]['issued_at'] -= CHALLENGE_TTL_SECONDS + 1
+    options, token = begin_registration(user, rp)
+    monkeypatch.setattr(passkey_state, 'CHALLENGE_TTL_SECONDS', -1)
     with pytest.raises(PasskeyError, match=EXPIRED):
-        verify_registration(user, rp, authenticator.create(options), None)
+        verify_registration(user, rp, authenticator.create(options), None, token)
 
 
 def test_verify_registration_refuses_another_accounts_challenge(
@@ -335,19 +351,10 @@ def test_verify_registration_refuses_another_accounts_challenge(
     rp: RelyingParty,
     authenticator: SoftwareAuthenticator,
 ) -> None:
-    options = json.loads(registration_options(admin_user, rp))
+    options, token = begin_registration(admin_user, rp)
     with pytest.raises(PasskeyError, match=EXPIRED):
-        verify_registration(user, rp, authenticator.create(options), None)
+        verify_registration(user, rp, authenticator.create(options), None, token)
     assert committed_passkeys(db) == []
-
-
-def test_verify_registration_spends_the_challenge(
-    user: User, rp: RelyingParty, authenticator: SoftwareAuthenticator
-) -> None:
-    answer = authenticator.create(json.loads(registration_options(user, rp)))
-    verify_registration(user, rp, answer, None)
-    with pytest.raises(PasskeyError, match=EXPIRED):
-        verify_registration(user, rp, answer, None)
 
 
 REGISTRATIONS_THAT_DO_NOT_VERIFY: dict[str, Answer] = {
@@ -380,9 +387,9 @@ def test_verify_registration_refuses_an_answer_that_does_not_verify(
     authenticator: SoftwareAuthenticator,
     answer: Answer,
 ) -> None:
-    options = json.loads(registration_options(user, rp))
+    options, token = begin_registration(user, rp)
     with pytest.raises(PasskeyError, match=NOT_VERIFIED):
-        verify_registration(user, rp, answer(authenticator, options), None)
+        verify_registration(user, rp, answer(authenticator, options), None, token)
     assert committed_passkeys(db) == []
 
 
@@ -446,13 +453,13 @@ def test_verify_registration_logs_why_it_refused(
     authenticator: SoftwareAuthenticator,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    options = json.loads(registration_options(user, rp))
+    options, token = begin_registration(user, rp)
     answer = authenticator.create(options, origin='https://evil.test')
     with (
         caplog.at_level(logging.WARNING, logger='src_back.services.passkeys'),
         pytest.raises(PasskeyError),
     ):
-        verify_registration(user, rp, answer, None)
+        verify_registration(user, rp, answer, None, token)
     refusal = 'A passkey registration was refused: InvalidRegistrationResponse('
     assert refusal in caplog.text
     assert 'https://evil.test' in caplog.text
@@ -470,8 +477,9 @@ def test_verify_registration_refuses_a_registered_credential(
 def test_verify_registration_is_audited(
     db: SQLAlchemy, user: User, rp: RelyingParty, authenticator: SoftwareAuthenticator
 ) -> None:
-    options = json.loads(registration_options(user, rp))
-    passkey = verify_registration(user, rp, authenticator.create(options), 'Laptop')
+    options, token = begin_registration(user, rp)
+    answer = authenticator.create(options)
+    passkey = verify_registration(user, rp, answer, 'Laptop', token)
     [saved] = committed_passkeys(db)
     assert saved is passkey
     entry = passkey_entry(db)
@@ -490,14 +498,15 @@ def test_verify_registration_is_audited(
 
 
 def test_authentication_options_name_no_credentials(rp: RelyingParty) -> None:
-    options = json.loads(authentication_options(rp))
+    options, token = begin_sign_in(rp)
     assert options['rpId'] == 'app.test'
     assert options['allowCredentials'] == []
     assert options['userVerification'] == 'required'
     assert options['timeout'] == 300000
-    pending = session[LOGIN_CHALLENGE_KEY]
-    assert pending['challenge'] == options['challenge']
-    assert pending['user_id'] is None
+    # The token carries the options' challenge, issued to no account.
+    challenge = challenge_from_token('login', token, user_id=None)
+    assert challenge is not None
+    assert bytes_to_base64url(challenge) == options['challenge']
 
 
 def test_verify_authentication_records_the_use(
@@ -578,9 +587,10 @@ def test_verify_authentication_refuses_another_user_handle(
     rp: RelyingParty, authenticator: SoftwareAuthenticator, user_handle: str | None
 ) -> None:
     # 'A' is not base64url, so py_webauthn raises binascii.Error on it.
-    answer = authenticator.get(json.loads(authentication_options(rp)))
+    options, token = begin_sign_in(rp)
+    answer = authenticator.get(options)
     answer['response']['userHandle'] = user_handle
-    assert verify_authentication(rp, answer) is None
+    assert verify_authentication(rp, answer, token) is None
 
 
 def signed_by_another_key(
@@ -619,8 +629,8 @@ SIGN_INS_THAT_DO_NOT_VERIFY: dict[str, Answer] = {
 def test_verify_authentication_refuses_an_answer_that_does_not_verify(
     rp: RelyingParty, authenticator: SoftwareAuthenticator, answer: Answer
 ) -> None:
-    options = json.loads(authentication_options(rp))
-    assert verify_authentication(rp, answer(authenticator, options)) is None
+    options, token = begin_sign_in(rp)
+    assert verify_authentication(rp, answer(authenticator, options), token) is None
 
 
 def test_verify_authentication_refuses_a_saved_key_cryptography_refuses(
@@ -648,23 +658,18 @@ def test_verify_authentication_lets_a_database_failure_through(
 
 
 def test_verify_authentication_needs_a_fresh_challenge(
-    user: User, rp: RelyingParty
+    user: User, rp: RelyingParty, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Its counter cannot refuse a replay, so only the spent challenge can.
+    # Its counter stays at 0, so the one answer can verify again at the end.
     authenticator = SoftwareAuthenticator(counter_step=0)
     persist(authenticator.credential_for(user))
-
-    answer = authenticator.get(json.loads(authentication_options(rp)))
-    session.pop(LOGIN_CHALLENGE_KEY)
-    assert verify_authentication(rp, answer) is None
-
-    answer = authenticator.get(json.loads(authentication_options(rp)))
-    session[LOGIN_CHALLENGE_KEY]['issued_at'] -= CHALLENGE_TTL_SECONDS + 1
-    assert verify_authentication(rp, answer) is None
-
-    answer = authenticator.get(json.loads(authentication_options(rp)))
-    assert verify_authentication(rp, answer) is user
-    assert verify_authentication(rp, answer) is None
+    options, token = begin_sign_in(rp)
+    answer = authenticator.get(options)
+    assert verify_authentication(rp, answer, None) is None
+    with monkeypatch.context() as patch:
+        patch.setattr(passkey_state, 'CHALLENGE_TTL_SECONDS', -1)
+        assert verify_authentication(rp, answer, token) is None
+    assert verify_authentication(rp, answer, token) is user
 
 
 # Upkeep

@@ -1,19 +1,19 @@
 """Passkeys: the WebAuthn ceremonies that add one and sign in with one, and their upkeep.
 
 The relying party is the site at ``PUBLIC_BASE_URL``, so passkeys are off without it.
-Each ceremony's challenge waits in the Flask session until its answer arrives, which works
-because every passkey call is a same-site request; ``ai/auth.md`` explains the flow and
-what the session does not defend against.
+Each ceremony's challenge travels in a signed token, which the routes keep in the
+ceremony's own cookie (:mod:`src_back.services.passkey_state`) and spend, so this module
+keeps no challenge. ``ai/auth.md`` explains the flow and what the cookie does not defend
+against.
 """
 
 import logging
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
-from flask import current_app, session
+from flask import current_app
 from sqlalchemy.exc import IntegrityError
 from webauthn import (
     generate_authentication_options,
@@ -23,8 +23,6 @@ from webauthn import (
     verify_registration_response,
 )
 from webauthn.helpers import (
-    base64url_to_bytes,
-    bytes_to_base64url,
     decode_credential_public_key,
     decoded_public_key_to_cryptography,
     parse_authentication_credential_json,
@@ -46,19 +44,15 @@ from webauthn.registration.verify_registration_response import VerifiedRegistrat
 from src_back.extensions import db
 from src_back.models import User, WebAuthnCredential
 from src_back.services.audit_log import AuditTrail
-from src_back.services.auth import require_another_sign_in_method
+from src_back.services.auth import lock_sign_in_methods, require_another_sign_in_method
 from src_back.services.errors import DuplicateRecordError, PasskeyError
+from src_back.services.passkey_state import (
+    CHALLENGE_TTL_SECONDS,
+    challenge_from_token,
+    new_challenge_token,
+)
 
 _log = logging.getLogger(__name__)
-
-CHALLENGE_TTL_SECONDS = 300
-"""How long a ceremony's challenge stays good; the browser's prompt waits as long."""
-
-REGISTER_CHALLENGE_KEY = 'passkey_register'
-"""The session key of a waiting registration challenge."""
-
-LOGIN_CHALLENGE_KEY = 'passkey_login'
-"""The session key of a waiting sign-in challenge."""
 
 EXPIRED = 'That passkey request expired. Try again.'
 NOT_VERIFIED = 'The passkey could not be verified.'
@@ -136,40 +130,6 @@ def rp_settings() -> RelyingParty | None:
     return RelyingParty(id=hostname, name=name, origin=origin)
 
 
-def _store_challenge(key: str, challenge: bytes, *, user_id: int | None) -> None:
-    """Keep a ceremony's challenge in the session until its answer arrives.
-
-    Args:
-        key: The session key for this kind of ceremony.
-        challenge: The random bytes the options carry.
-        user_id: The account the options were built for, or ``None`` for a sign-in.
-    """
-    session[key] = {
-        'challenge': bytes_to_base64url(challenge),
-        'issued_at': time.time(),
-        'user_id': user_id,
-    }
-
-
-def _take_challenge(key: str, *, user_id: int | None) -> bytes | None:
-    """Take a ceremony's challenge out of the session, so one answer spends it.
-
-    Args:
-        key: The session key for this kind of ceremony.
-        user_id: The account answering, or ``None`` for a sign-in.
-
-    Returns:
-        The challenge, or ``None`` when none is waiting, it is older than
-        :data:`CHALLENGE_TTL_SECONDS`, or it was issued to another account.
-    """
-    pending = session.pop(key, None)
-    if not isinstance(pending, dict) or pending.get('user_id') != user_id:
-        return None
-    if time.time() - pending['issued_at'] > CHALLENGE_TTL_SECONDS:
-        return None
-    return base64url_to_bytes(pending['challenge'])
-
-
 def _descriptor(passkey: WebAuthnCredential) -> PublicKeyCredentialDescriptor:
     """Describe a saved passkey for the exclude list.
 
@@ -188,8 +148,8 @@ def _descriptor(passkey: WebAuthnCredential) -> PublicKeyCredentialDescriptor:
     )
 
 
-def registration_options(user: User, rp: RelyingParty) -> str:
-    """Build the options for adding a passkey, and keep their challenge.
+def registration_options(user: User, rp: RelyingParty) -> tuple[str, str]:
+    """Build the options for adding a passkey, and sign their challenge.
 
     The passkey must be discoverable, so it can sign in without an email, and must verify
     its user, with a biometric, a screen lock, or a PIN. The account's ``uuid`` is its
@@ -201,7 +161,8 @@ def registration_options(user: User, rp: RelyingParty) -> str:
         rp: The relying party.
 
     Returns:
-        The options as JSON, for ``startRegistration``.
+        The options as JSON, for ``startRegistration``, and the token that carries their
+        challenge, issued to this account, for the registration cookie.
     """
     options = generate_registration_options(
         rp_id=rp.id,
@@ -216,8 +177,8 @@ def registration_options(user: User, rp: RelyingParty) -> str:
         ),
         exclude_credentials=[_descriptor(passkey) for passkey in user.passkeys],
     )
-    _store_challenge(REGISTER_CHALLENGE_KEY, options.challenge, user_id=user.id)
-    return options_to_json(options)
+    token = new_challenge_token('register', options.challenge, user_id=user.id)
+    return options_to_json(options), token
 
 
 def _new_passkey(
@@ -281,35 +242,28 @@ def _save_new_passkey(user: User, passkey: WebAuthnCredential) -> WebAuthnCreden
     return passkey
 
 
-def verify_registration(
-    user: User, rp: RelyingParty, credential: dict[str, Any], nickname: str | None
-) -> WebAuthnCredential:
-    """Check the browser's answer to the registration options, then save the passkey.
+def _check_registration(
+    rp: RelyingParty, credential: dict[str, Any], challenge: bytes
+) -> tuple[VerifiedRegistration, RegistrationCredential]:
+    """Have py_webauthn check a registration answer, then build its public key.
 
     py_webauthn checks the challenge, the origin, the RP ID, and that the authenticator
     saw and verified its user. Hostile bytes can escape it as many exception types, and
-    this block touches no database, so any exception is a refusal. A ``none``
-    attestation leaves the public key unbuilt until a sign-in uses it, so it is built
-    here, and a key cryptography refuses fails now rather than at every sign-in. A
-    credential id longer than WebAuthn allows is refused, and one already registered
-    raises :class:`DuplicateRecordError` when it is saved.
+    this touches no database, so any exception is a refusal. A ``none`` attestation
+    leaves the public key unbuilt until a sign-in uses it, so it is built here, and a key
+    cryptography refuses fails now rather than at every sign-in.
 
     Args:
-        user: The signed-in account adding the passkey.
         rp: The relying party.
         credential: The ``RegistrationResponseJSON`` that ``startRegistration`` returned.
-        nickname: The passkey's name, or ``None``.
+        challenge: The challenge the registration options carried.
 
     Returns:
-        The saved passkey.
+        What py_webauthn verified, and the parsed answer, which holds the transports.
 
     Raises:
-        PasskeyError: If no challenge for this account is waiting or it expired, or if the
-            answer does not verify.
+        PasskeyError: If the answer does not verify.
     """
-    challenge = _take_challenge(REGISTER_CHALLENGE_KEY, user_id=user.id)
-    if challenge is None:
-        raise PasskeyError(EXPIRED)
     try:
         parsed = parse_registration_credential_json(credential)
         verified = verify_registration_response(
@@ -324,6 +278,40 @@ def verify_registration(
     except Exception as exc:  # py_webauthn lets hostile bytes escape as many types
         _log.warning('A passkey registration was refused: %r', exc)
         raise PasskeyError(NOT_VERIFIED) from exc
+    return verified, parsed
+
+
+def verify_registration(
+    user: User,
+    rp: RelyingParty,
+    credential: dict[str, Any],
+    nickname: str | None,
+    token: str | None,
+) -> WebAuthnCredential:
+    """Check the browser's answer to the registration options, then save the passkey.
+
+    :func:`_check_registration` checks the answer. A credential id longer than WebAuthn
+    allows is refused, and one already registered raises :class:`DuplicateRecordError`
+    when it is saved. The route, not this, spends the challenge, by clearing its cookie.
+
+    Args:
+        user: The signed-in account adding the passkey.
+        rp: The relying party.
+        credential: The ``RegistrationResponseJSON`` that ``startRegistration`` returned.
+        nickname: The passkey's name, or ``None``.
+        token: The registration cookie's challenge token, or ``None`` without one.
+
+    Returns:
+        The saved passkey.
+
+    Raises:
+        PasskeyError: If the token is missing, expired, or issued to another account, or
+            if the answer does not verify.
+    """
+    challenge = challenge_from_token('register', token, user_id=user.id)
+    if challenge is None:
+        raise PasskeyError(EXPIRED)
+    verified, parsed = _check_registration(rp, credential, challenge)
     id_length = len(verified.credential_id)
     if id_length > MAX_CREDENTIAL_ID_BYTES:
         _log.warning('A passkey registration was refused: a %d-byte id', id_length)
@@ -331,8 +319,8 @@ def verify_registration(
     return _save_new_passkey(user, _new_passkey(verified, parsed, nickname))
 
 
-def authentication_options(rp: RelyingParty) -> str:
-    """Build sign-in options for any of the site's passkeys, and keep their challenge.
+def authentication_options(rp: RelyingParty) -> tuple[str, str]:
+    """Build sign-in options for any of the site's passkeys, and sign their challenge.
 
     They name no credentials, so the browser offers every passkey it holds for the RP ID,
     in its own prompt or in the email field's autofill.
@@ -341,15 +329,16 @@ def authentication_options(rp: RelyingParty) -> str:
         rp: The relying party.
 
     Returns:
-        The options as JSON, for ``startAuthentication``.
+        The options as JSON, for ``startAuthentication``, and the token that carries their
+        challenge, for the sign-in cookie.
     """
     options = generate_authentication_options(
         rp_id=rp.id,
         timeout=CHALLENGE_TTL_SECONDS * 1000,
         user_verification=UserVerificationRequirement.REQUIRED,
     )
-    _store_challenge(LOGIN_CHALLENGE_KEY, options.challenge, user_id=None)
-    return options_to_json(options)
+    token = new_challenge_token('login', options.challenge, user_id=None)
+    return options_to_json(options), token
 
 
 def _find_passkey(credential: AuthenticationCredential) -> WebAuthnCredential | None:
@@ -375,24 +364,27 @@ def _find_passkey(credential: AuthenticationCredential) -> WebAuthnCredential | 
     return passkey
 
 
-def verify_authentication(rp: RelyingParty, credential: dict[str, Any]) -> User | None:
+def verify_authentication(
+    rp: RelyingParty, credential: dict[str, Any], token: str | None
+) -> User | None:
     """Check a sign-in answer, then record the passkey's use.
 
     Every refusal looks the same to the caller, so an answer learns nothing about which
     passkeys exist. The authenticator must have verified its user, and a counter that
     does not move past the saved one is refused unless both are 0, which synced passkeys
-    always report.
+    always report. The route, not this, spends the challenge, by clearing its cookie.
 
     Args:
         rp: The relying party.
         credential: The ``AuthenticationResponseJSON`` that ``startAuthentication``
             returned.
+        token: The sign-in cookie's challenge token, or ``None`` without one.
 
     Returns:
-        The passkey's account, or ``None`` when no challenge is waiting or it expired, no
-        saved passkey matches, or the answer does not verify.
+        The passkey's account, or ``None`` when the token is missing or expired, no saved
+        passkey matches, or the answer does not verify.
     """
-    challenge = _take_challenge(LOGIN_CHALLENGE_KEY, user_id=None)
+    challenge = challenge_from_token('login', token, user_id=None)
     if challenge is None:
         return None
     try:
@@ -470,7 +462,10 @@ def rename_passkey(
 def delete_passkey(user: User, passkey_id: int) -> bool:
     """Delete one of an account's passkeys, unless it is the last way to sign in.
 
-    :func:`~src_back.services.auth.require_another_sign_in_method` refuses the last one.
+    :func:`~src_back.services.auth.lock_sign_in_methods` comes first, so a removal that
+    overlaps this one finishes before the passkey is looked up and the methods counted,
+    and :func:`~src_back.services.auth.require_another_sign_in_method` refuses the last
+    one.
 
     Args:
         user: The signed-in account.
@@ -479,6 +474,7 @@ def delete_passkey(user: User, passkey_id: int) -> bool:
     Returns:
         ``True`` once the passkey is gone, ``False`` if the account has none with that id.
     """
+    lock_sign_in_methods(user)
     passkey = _owned_passkey(user, passkey_id)
     if passkey is None:
         return False

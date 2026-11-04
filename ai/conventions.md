@@ -82,16 +82,18 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `admin_required`, keeps Flask-Login's.
 - Every POST, PUT, PATCH, or DELETE to `/api` or `/uploads` must carry
   `X-Requested-With: XMLHttpRequest`, which the axios client sends on every request;
-  `_require_requested_with_header` in `app.py` answers any other with 403. It is CSRF
-  defense in depth. SameSite cookies keep other sites' requests from carrying the
-  session, but a sibling subdomain counts as the same site, and an older browser may
-  ignore SameSite. A form cannot set a custom header, and a script on another origin
-  cannot send one without a CORS preflight, which only the origins in
-  `CORS_ALLOWED_ORIGINS` pass: production sets it to the site's own origin, while
-  development's `*` passes every origin. A route that must accept a cross-site POST is
-  named in `_CROSS_SITE_POST_ENDPOINTS` in `app.py` and checks its own signed `state`
-  instead; `oauth.callback`, which Sign in with Apple's `form_post` answer reaches (#30),
-  is the only one.
+  `_require_requested_with_header` in `app.py` answers any other with 403. So must a GET
+  or HEAD of an endpoint in `_SPA_ONLY_GET_ENDPOINTS`, the two passkey options routes,
+  because each sets a challenge cookie that a navigation from another site must not
+  replace (`ai/auth.md`). It is CSRF defense in depth. SameSite cookies keep other sites'
+  requests from carrying the session, but a sibling subdomain counts as the same site,
+  and an older browser may ignore SameSite. A form cannot set a custom header, and a
+  script on another origin cannot send one without a CORS preflight, which only the
+  origins in `CORS_ALLOWED_ORIGINS` pass: production sets it to the site's own origin,
+  while development's `*` passes every origin. A route that must accept a cross-site
+  POST is named in `_CROSS_SITE_POST_ENDPOINTS` in `app.py` and checks its own signed
+  `state` instead; `oauth.callback`, which Sign in with Apple's `form_post` answer
+  reaches (#30), is the only one.
 - Accounts are deactivated, never deleted, so the rows that reference them stay
   intact. `complete_login` refuses a deactivated account with `InactiveAccountError`,
   and every caller checks the credential first, so the refusal never tells a stranger that
