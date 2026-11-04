@@ -9,6 +9,12 @@ from src_back.models import Role, User
 from src_back.models.user import normalize_email
 from src_back.schemas.base import BaseSchema, UTCDateTime, validate_ids_exist
 from src_back.schemas.oauth import oauth_account_schema, oauth_provider_schema
+from src_back.schemas.passkeys import (
+    passkey_assertion_schema,
+    passkey_register_schema,
+    passkey_rename_schema,
+    passkey_schema,
+)
 from src_back.schemas.user import (
     login_schema,
     registration_schema,
@@ -168,6 +174,71 @@ def test_oauth_provider_schema_dumps_name_and_label(app: Flask) -> None:
     data = cast(dict[str, Any], oauth_provider_schema.dump(provider))
     assert set(data) == {'name', 'label'}
     assert data == {'name': 'google', 'label': 'Google'}
+
+
+def test_passkey_schema_hides_the_key_material(passkey_user: User) -> None:
+    data = cast(dict[str, Any], passkey_schema.dump(passkey_user.passkeys[0]))
+    assert {'nickname', 'last_used_at'} <= set(data)
+    assert not {'credential_id', 'public_key', 'sign_count', 'user_id'} & set(data)
+
+
+# Each schema that takes a nickname, with the rest of a payload it accepts.
+NICKNAME_SCHEMAS = {
+    'register': (passkey_register_schema, {'credential': {}}),
+    'rename': (passkey_rename_schema, {}),
+}
+
+
+def _load_nickname(schema: Schema, payload: dict[str, Any], nickname: object) -> object:
+    loaded = cast(dict[str, Any], schema.load({**payload, 'nickname': nickname}))
+    return loaded['nickname']
+
+
+@pytest.mark.parametrize(
+    ('schema', 'payload'), NICKNAME_SCHEMAS.values(), ids=NICKNAME_SCHEMAS.keys()
+)
+def test_passkey_nickname_is_trimmed_before_its_length_rule(
+    schema: Schema, payload: dict[str, Any]
+) -> None:
+    assert _load_nickname(schema, payload, '  Laptop  ') == 'Laptop'
+    assert _load_nickname(schema, payload, '   ') is None
+    assert _load_nickname(schema, payload, f'  {"n" * 64}  ') == 'n' * 64
+    with pytest.raises(ValidationError):
+        _load_nickname(schema, payload, 'n' * 65)
+
+
+def test_passkey_register_schema_defaults_the_nickname_to_none() -> None:
+    assert passkey_register_schema.load({'credential': {}}) == {
+        'credential': {},
+        'nickname': None,
+    }
+
+
+def test_passkey_rename_schema_requires_the_nickname_key() -> None:
+    with pytest.raises(ValidationError):
+        passkey_rename_schema.load({})
+    assert passkey_rename_schema.load({'nickname': None}) == {'nickname': None}
+
+
+@pytest.mark.parametrize(
+    ('schema', 'payload'), NICKNAME_SCHEMAS.values(), ids=NICKNAME_SCHEMAS.keys()
+)
+def test_passkey_nickname_hook_passes_other_payloads_to_validation(
+    schema: Schema, payload: dict[str, Any]
+) -> None:
+    # Validation refuses them; the hook must not raise AttributeError first.
+    with pytest.raises(ValidationError):
+        schema.load([{**payload, 'nickname': 'Laptop'}])
+    with pytest.raises(ValidationError):
+        schema.load({**payload, 'nickname': 5})
+
+
+def test_passkey_assertion_schema_requires_a_credential_object() -> None:
+    with pytest.raises(ValidationError):
+        passkey_assertion_schema.load({})
+    with pytest.raises(ValidationError):
+        passkey_assertion_schema.load({'credential': 'x'})
+    assert passkey_assertion_schema.load({'credential': {}}) == {'credential': {}}
 
 
 def test_user_repr_names_the_email(app: Flask) -> None:

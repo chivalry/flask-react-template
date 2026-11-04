@@ -102,7 +102,7 @@ def complete_login(user: User) -> None:
     """Start the session of a user whose identity has been verified.
 
     Every sign-in ends here, whatever proved the identity: registration, password
-    login, and a provider callback now, a passkey later. Each of them therefore inherits
+    login, a provider callback, and a passkey. Each of them therefore inherits
     the refusal of a deactivated account. Without it, Flask-Login's ``login_user``
     would return ``False`` without signing anyone in, and the route would still
     answer 200. Callers verify the credential first, so the refusal reaches only
@@ -125,8 +125,7 @@ def complete_login(user: User) -> None:
 def count_sign_in_methods(user: User) -> int:
     """Count the ways an account can sign in.
 
-    A password and each linked provider count; passkeys join the count when their table
-    arrives.
+    A password, each linked provider, and each passkey count.
 
     Args:
         user: The account to inspect.
@@ -134,13 +133,31 @@ def count_sign_in_methods(user: User) -> int:
     Returns:
         The number of sign-in methods the account has.
     """
-    return (1 if user.has_password else 0) + len(user.oauth_accounts)
+    providers_and_passkeys = len(user.oauth_accounts) + len(user.passkeys)
+    return (1 if user.has_password else 0) + providers_and_passkeys
+
+
+def lock_sign_in_methods(user: User) -> None:
+    """Lock an account's row, then reload its sign-in methods, before one is removed.
+
+    PostgreSQL makes a second removal wait at the lock until the first commits, so the
+    methods it then reloads lack the first one's, and two removals at once cannot both
+    pass :func:`require_another_sign_in_method`. The lock lasts until the caller's
+    transaction ends. SQLite ignores the lock, and production runs PostgreSQL.
+
+    Args:
+        user: The account about to lose a method.
+    """
+    db.session.query(User).filter_by(id=user.id).with_for_update().one()
+    db.session.expire(user, ['oauth_accounts', 'passkeys'])
 
 
 def require_another_sign_in_method(user: User) -> None:
     """Refuse to remove a sign-in method that is the account's last.
 
-    Code that removes one calls this first.
+    Code that removes one first calls :func:`lock_sign_in_methods`, then looks the method
+    up, and then calls this, so the count it checks includes no method that another
+    removal has taken away.
 
     Args:
         user: The account about to lose a method.

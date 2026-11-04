@@ -92,6 +92,12 @@ modules in the last entry, which come with Python.
   client secret will need it too (#30). Authlib, which uses it, is not installed: its
   Flask client keeps state in the session, which the provider's redirect cannot read under
   a `SameSite=Strict` cookie.
+- **webauthn** (py_webauthn): builds the passkey ceremonies' options and verifies the
+  browser's answers, in `src_back/services/passkeys.py`. It brings `cbor2`, a Rust
+  extension with wheels for macOS on Apple silicon, Linux, and Windows, so an Intel Mac
+  needs Rust to install it. The tests answer the ceremonies with their own software
+  authenticator rather than `soft-webauthn`, whose last release, in 2022, pins `fido2`
+  below 2.0.
 - **watchdog**: not in `requirements.txt`; the dev stack's build installs it into the
   backend image through the `DEVELOPMENT_PACKAGES` build argument. Flask's reloader uses
   it when present and then notices modules being added and deleted, which its fallback
@@ -164,6 +170,10 @@ The `dependencies` in `package.json`: what the browser bundle ships.
   sent.
 - **Zustand**: the one store, holding the signed-in user and the session check that
   `ProtectedRoute` waits on.
+- **`@simplewebauthn/browser`**: runs the browser's passkey prompt and the email field's
+  autofill, and turns their binary answers into JSON, in `api/passkeys.ts` and
+  `hooks/usePasskeyLogin.ts`. It has no dependencies and is about 4 KB gzipped, and only
+  the lazy sign-in and Account pages import it, so it has no vendor chunk.
 
 ## Frontend build, test, and quality tools
 

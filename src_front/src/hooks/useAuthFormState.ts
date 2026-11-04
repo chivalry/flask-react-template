@@ -49,19 +49,22 @@ export function useAuthFormState() {
      * the store is filled from that response rather than from a second `/me`
      * round trip that could fail or race the page-load reconciliation. The
      * client's interceptor has already copied any server error text into the
-     * thrown `Error`; the fallback covers anything else that was thrown.
+     * thrown `Error`; the fallback covers anything else that was thrown. An action
+     * that resolves null was cancelled, as a dismissed passkey prompt is, and leaves
+     * the page as it was.
      *
      * @param action - The auth call to run, such as `login` or `register`.
      * @param fallback - Message to show when the thrown value is not an `Error`.
      */
     const handleAuthAction = async (
-        action: () => Promise<AxiosResponse<AuthUser>>,
+        action: () => Promise<AxiosResponse<AuthUser> | null>,
         fallback: string,
     ) => {
         clearError()
         try {
-            const { data: user } = await action()
-            setUser(user)
+            const response = await action()
+            if (response === null) return
+            setUser(response.data)
             navigate(requestedPath(location.state))
         } catch (err: unknown) {
             onErr(err instanceof Error ? err : new Error(fallback))

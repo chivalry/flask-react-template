@@ -38,6 +38,12 @@ export interface EntityListProps<T extends { id: number }> {
     groupOf?: (item: T) => string
 }
 
+/** The width of one icon button at the end of a row. */
+const ACTION_WIDTH_PX = 40
+
+/** How far MUI insets a row's actions from its right edge. */
+const ACTIONS_INSET_PX = 16
+
 /** Props accepted by {@link EntityRow}. */
 interface EntityRowProps {
     primary: ReactNode
@@ -56,6 +62,8 @@ function EntityRow(props: EntityRowProps) {
     return (
         <ListItem
             divider
+            // MUI pads a row for one action; leave room for every icon button it holds.
+            sx={{ pr: `${ACTIONS_INSET_PX + actions.length * ACTION_WIDTH_PX}px` }}
             secondaryAction={
                 <Stack direction="row">
                     {actions.map((action) => (

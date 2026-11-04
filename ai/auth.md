@@ -3,8 +3,8 @@
 ## Overview
 
 Accounts sign in with an email and a password through `src_back/api/auth.py` and
-`src_back/services/auth.py`, or through a sign-in provider (below). #30, #31, and passkeys
-(#32) build on the same groundwork:
+`src_back/services/auth.py`, or through a sign-in provider, or with a passkey (both
+below). Sign in with Apple (#30) and Facebook (#31) build on the same groundwork:
 
 - `User` stores every email through `normalize_email()` in `src_back/models/user.py`
   (trimmed and lowercased), however the account is created or edited, and
@@ -18,9 +18,13 @@ Accounts sign in with an email and a password through `src_back/api/auth.py` and
   provider callback with `account_inactive`, and otherwise makes the session permanent.
   Callers check the credential first, so only someone who proved it learns that the
   account is deactivated.
-- `count_sign_in_methods(user)` counts the ways an account can sign in. Code that removes
-  one calls `require_another_sign_in_method(user)` first, which raises
-  `LastSignInMethodError` (409) instead of removing the last.
+- `count_sign_in_methods(user)` counts the ways an account can sign in: a password, each
+  linked provider, and each passkey. Code that removes one calls
+  `lock_sign_in_methods(user)` before it looks the method up, then
+  `require_another_sign_in_method(user)`, which raises `LastSignInMethodError` (409)
+  instead of removing the last. The lock holds the account's row until the commit, so on
+  PostgreSQL two removals at once take turns, and the second counts what the first left;
+  SQLite ignores it.
 - Self-registration loads `RegistrationSchema`, which accepts only an email and a
   password: `role` or `is_active` in the body answers 422, so nobody registers as an
   admin. A registered account is an active `user`.
@@ -29,10 +33,11 @@ Accounts sign in with an email and a password through `src_back/api/auth.py` and
   as Sign in with Apple's `form_post` will (#30), so `oauth.callback` is exempt and checks
   its signed `state` instead.
 
-An account without a password is trusted to own its email address as far as the sign-in
-provider that created it verified the address, and "The linking policy" says how far that
-goes. Any new way to create such an account, such as an invitation or a passkey-first
-sign-up, must verify the address first; otherwise linking a provider by email would hand
+An account without a password got its email address from the sign-in provider that
+created it, which verified the address. No sign-in attaches a provider to an existing
+account by its email unless `AUTO_LINK_BY_EMAIL` is on ("The linking policy"). A project
+that turns it on must also verify the address of every account created another way, such
+as by an invitation or a passkey-first sign-up, or linking a provider by email would hand
 the account to whoever created it.
 
 ## Sign-in providers
@@ -75,7 +80,7 @@ in `src_back/services/oauth_providers.py`.
 | `invalid_token`    | The ID token, or the keys to check it, failed validation      |
 | `email_required`   | The provider gave no email                                    |
 | `email_unverified` | The provider has not verified the email                       |
-| `link_required`    | The email belongs to an account with a password               |
+| `link_required`    | The email belongs to an existing account                      |
 | `already_linked`   | The identity, or the account's slot for it, is already taken  |
 | `account_inactive` | The account has been deactivated or no longer exists          |
 
@@ -123,23 +128,23 @@ provider. A `limit_req` for it needs a location per provider, which is its own i
    says. An account has one link per provider, so a second is `already_linked`.
 3. No email is `email_required`, and an unverified one is `email_unverified`.
 4. A verified email with no account creates one, with no password and the `user` role.
-5. A verified email on an account without a password attaches and signs in: that account's
-   email was itself asserted by a provider that verified it.
-6. A verified email on an account with a password is `link_required`. Registration never
-   verifies an address, so auto-linking would let anyone who registered the victim's
-   address keep a working password to the merged account. Sign in with the password, then
-   link from the Account page. A project that verifies addresses at registration can set
-   `AUTO_LINK_PASSWORD_ACCOUNTS`.
+5. A verified email that belongs to an account, with a password or without, is
+   `link_required`: sign in another way, then link from the Account page. Registration
+   never verifies an address, so attaching to an account with a password would leave
+   whoever registered the victim's address a working password to the merged account. An
+   account without a password can unlink its provider while it keeps a passkey, so
+   attaching to one would let the identity its owner removed attach itself again. A
+   project that verifies addresses at registration, and accepts that an unlink then no
+   longer revokes a provider, can set `AUTO_LINK_BY_EMAIL`.
 
-Rules 4 and 5 take the provider's word. Google warns that `email_verified` records a past
-check: for an address outside `@gmail.com` and Google Workspace, "ownership of the third
-party email account may have since changed", and it recommends another challenge
+Rule 4 takes the provider's word. Google warns that `email_verified` records a past check:
+for an address outside `@gmail.com` and Google Workspace, "ownership of the third party
+email account may have since changed", and it recommends another challenge
 ([Google](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token)).
 So rule 4 can create an account for a stale address, and the real owner's registration
-then answers 409, which is no worse than anyone registering that address today. Rule 5
-cannot fire while Google is the only provider, because every account without a password
-already holds its Google link. Decide it when adding a second provider: dropping rule 5,
-so that every existing account answers `link_required`, needs nothing stored beforehand.
+then answers 409, which is no worse than anyone registering that address today. Under
+rule 5, an account one provider created answers `link_required` to a second provider's
+sign-in (#30, #31) until its owner links that provider from the Account page.
 
 Link mode needs that same-origin request as well as the session, so another site cannot
 start it, and a stale session cannot turn a sign-in into a link. Every link and unlink is
@@ -173,6 +178,125 @@ DELETE FROM oauth_accounts WHERE user_id = <id> AND provider = '<provider>';
    server after changing them. A server provisioned before this has no such lines, which
    leaves Google off.
 
+## Passkeys
+
+A passkey is a WebAuthn credential: a key pair whose private half stays in the person's
+device or password manager, and whose public half `webauthn_credentials` keeps.
+`src_back/services/passkeys.py` runs the two ceremonies with `webauthn` (py_webauthn),
+`src_back/api/passkeys.py` serves them under `/api/v1/auth/passkeys`, and the browser
+side is `@simplewebauthn/browser`.
+
+### Signing in with a passkey
+
+The sign-in page offers passkeys two ways, and neither asks for an email:
+
+- The email field's `autocomplete="username webauthn"` lets the browser list the site's
+  passkeys among its suggestions. The page starts this autofill ceremony when it mounts,
+  renews it every four minutes, at once after a passkey picked from it fails, and after a
+  failed or dismissed button sign-in, and stops it when it unmounts. A passkey picked and
+  then dismissed at the device's prompt leaves the suggestions empty until the next
+  renewal; the button works meanwhile.
+- "Sign in with a passkey" opens the browser's own prompt, which ends the autofill
+  ceremony, because a browser runs one at a time.
+
+Both fetch `GET /login/options`, whose options name no credentials, so the browser offers
+every passkey it holds for the site, and post the browser's answer to `/login/verify`.
+The server finds the passkey by its credential id, requires the answer's user handle to be
+the `uuid` of that passkey's account, checks the signature and the counter, records the
+counter, the backup state, and `last_used_at`, and calls `complete_login`. Every refusal
+is the same 401, `That passkey was not accepted.`, and a deactivated account gets its 403
+only after its passkey checked out, as with a password. A dismissed prompt changes
+nothing on the page.
+
+Both ceremonies require user verification, so a passkey is two factors: the device and
+its biometric, screen lock, or PIN. A security key without a PIN must be given one first;
+Chrome offers to create it, and otherwise the key maker's tool sets it.
+
+### Managing passkeys
+
+The Account page's Passkeys section adds, renames, and deletes the signed-in account's
+passkeys. Adding one (`GET /register/options`, then `POST /register/verify`) asks for an
+optional nickname, then for the browser's prompt. The options exclude the account's
+passkeys, so a device that already holds one says so. A passkey counts as a sign-in
+method: deleting an account's last way to sign in is a 409, and unlinking a provider is
+allowed while a passkey remains. Each add, rename, and delete is audited in
+`webauthn_credentials`, admin-only, because the history route serves any signed-in account
+a table that is not, and would show every account's passkeys; a sign-in is not audited.
+
+### Relying party
+
+`rp_settings()` derives the relying party from `PUBLIC_BASE_URL`:
+
+- The RP ID is its host name, without the scheme or port: `example.com`, or `localhost`
+  in development. A passkey works only for its RP ID, so moving the site to another domain
+  orphans every passkey, and staging, on its own host, can use none of production's.
+- The expected origin is its scheme, host, and port, rebuilt as browsers report it, with
+  the host lowercased and a default port dropped. Give the host in ASCII: browsers report
+  an internationalized name in its punycode form.
+- `WEBAUTHN_RP_NAME` names the site in the browser's prompt.
+
+Without `PUBLIC_BASE_URL` the four ceremony routes answer 404 with
+`Passkeys are not enabled.`, as they do, with a warning in the log, when it does not
+parse, as with a port that is not a number; listing, renaming, and deleting still work.
+An IP address cannot be an RP ID, so a local setup uses `localhost`, which browsers treat
+as secure over plain http.
+
+### Challenges
+
+A ceremony's challenge waits five minutes (`CHALLENGE_TTL_SECONDS`) in a signed cookie of
+its own, which `src_back/services/passkey_state.py` writes: `__Host-passkey_register` or
+`__Host-passkey_login`, `HttpOnly`, `Secure`, and `SameSite=Strict`, or, over plain http,
+`passkey_register` or `passkey_login` under `/api/v1/auth/passkeys`. The options GET sets
+it, and every answer from the verify POST clears it, so one answer spends it. A
+registration challenge also names its account, so an answer that arrives after another
+account signed in on the same browser is refused.
+
+The challenge stays out of the Flask session on purpose. An options answer that rewrote
+the session cookie could land after a sign-in that finished while it was in flight, and
+sign the visitor out; a navigation from another site, which arrives without the
+`SameSite=Strict` session cookie, would have replaced the session with one holding only
+the challenge. The two options GETs also require `X-Requested-With`
+(`ai/conventions.md`), so another site cannot replace a challenge by navigation, and the
+sign-in page sends its options and verify requests one at a time, so the newest answer
+always lands last.
+
+A second sign-in tab replaces the first tab's challenge, so a passkey picked in the first
+fails once. A browser's autofill request never times out, so the sign-in page renews its
+offer every four minutes, before the challenge expires.
+
+The cookie is signed, not stored, so whoever holds both a browser's challenge cookie and
+an answer it just sent could replay the answer until the challenge expires. The counter
+stops that for authenticators that count, but synced passkeys always report 0. Both
+halves leave the browser only over TLS. A server-side record of spent challenges, such as
+a table a scheduled job sweeps, would close the gap; the cookie costs no write per
+sign-in.
+
+### Lost passkeys and compromised accounts
+
+An account whose only way in is a passkey on a lost device cannot sign in. An admin sets
+a password for it on the Users screen; its owner signs in, deletes the lost passkey on the
+Account page, and adds a new one. Until it is deleted, the lost passkey still signs in for
+whoever unlocks that device.
+
+Adding a passkey asks for no fresh proof, as linking a provider does not, and a passkey
+survives a password change. To clear a compromised account, follow the steps for links
+in "The linking policy", reading the `webauthn_credentials` history as well, and delete
+each passkey its owner does not recognize:
+
+```sql
+DELETE FROM webauthn_credentials WHERE user_id = <id> AND id = <passkey id>;
+```
+
+### Trying passkeys locally
+
+Chrome's DevTools have a WebAuthn panel (More tools, then WebAuthn). Enable the virtual
+authenticator environment, add a `ctap2` authenticator, and tick Supports resident keys
+and Supports user verification, which start unticked and without which every ceremony
+fails here; then add and use passkeys on `http://localhost:<port>` as on a real device.
+Chrome refuses WebAuthn on a page with a certificate error, so a self-signed https origin
+will not do. The backend tests use `src_back/tests/software_authenticator.py`, which
+answers both ceremonies with a real P-256 key.
+
 ## Sign-in throttling
 
 In production, host nginx counts the POSTs each client address sends under
@@ -181,9 +305,11 @@ answers the rest with 429 and `{"error": "Too many attempts. Try again in a minu
 (`scripts/nginx-ssl.conf.template`). GETs never count, so `/me`, which every page load
 sends, is never throttled. Development has no nginx and no limit.
 
-- Every POST under `/api/v1/auth/` shares the budget, including later ones such as the
-  passkey ceremonies (#32) and Sign in with Apple's callback (#30). A sign-in that
-  takes two POSTs leaves a user three attempts at once.
+- Every POST under `/api/v1/auth/` shares the budget, including a passkey's answers to
+  `/passkeys/login/verify` and `/passkeys/register/verify`, and Sign in with Apple's
+  callback (#30). The passkey options are GETs, so the sign-in page's autofill, which
+  asks for them on every visit and every four minutes after, spends nothing. A passkey
+  sign-in costs one POST, as a password sign-in does.
 - The limit keys on the address nginx sees. Behind a CDN or another proxy, that is the
   proxy's address, so configure `real_ip_header` and `set_real_ip_from` first.
 - Each app on a host has its own zone, named for `APP_NAME`. The `map` that picks out

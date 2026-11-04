@@ -53,3 +53,7 @@ class OAuthError(Exception):
         """
         super().__init__(code)
         self.code = code
+
+
+class PasskeyError(Exception):
+    """A passkey's registration answer expired or did not verify (400)."""

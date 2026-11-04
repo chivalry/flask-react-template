@@ -173,7 +173,10 @@ Production is only read. In order, the script:
 
 Testers then sign in to staging with their production passwords. An account with no
 password, which a sign-in provider created, can sign in there only when staging has that
-provider's keys.
+provider's keys. Passkeys copy too, but none works there: each is bound to production's
+host name, and staging has its own, so a tester adds a passkey on staging to try one. An
+account whose only way in is a passkey cannot sign in to staging until an admin there sets
+it a password.
 
 The copy holds every account's email and password hash, so staging must stay behind its
 password. The script refuses until staging's installed nginx site asks for one; set

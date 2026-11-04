@@ -24,6 +24,7 @@ from src_back.services.oauth_state import (
 )
 from src_back.tests.conftest import OAUTH_CLIENT_ID, OidcSigner
 from src_back.tests.helpers import persist
+from src_back.tests.software_authenticator import SoftwareAuthenticator
 
 OAUTH_URL = '/api/v1/auth/oauth'
 START_URL = f'{OAUTH_URL}/google/start'
@@ -401,21 +402,26 @@ def test_callback_never_attaches_to_a_password_account(
     assert me_from_the_session_cookie(client).status_code == 401
 
 
+@pytest.mark.parametrize('has_password', [True, False], ids=['password', 'no-password'])
 def test_the_constant_relaxes_that_refusal(
     client: FlaskClient,
     user: User,
+    passwordless_user: User,
     mocked_http: responses.RequestsMock,
     oidc_signer: OidcSigner,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    has_password: bool,
 ) -> None:
-    monkeypatch.setattr(oauth_service, 'AUTO_LINK_PASSWORD_ACCOUNTS', True)
-    claims = {'email': user.email, 'email_verified': True}
+    monkeypatch.setattr(oauth_service, 'AUTO_LINK_BY_EMAIL', True)
+    account = user if has_password else passwordless_user
+    claims = {'email': account.email, 'email_verified': True}
     response = sign_in(client, mocked_http, oidc_signer, claims)
     assert redirect_location(response) == f'{ORIGIN}/'
-    assert [account.provider for account in user.oauth_accounts] == ['google']
+    assert [link.provider for link in account.oauth_accounts] == ['google']
 
 
-def test_callback_attaches_to_a_passwordless_account(
+def test_callback_never_attaches_to_a_passwordless_account(
     client: FlaskClient,
     db: SQLAlchemy,
     passwordless_user: User,
@@ -424,11 +430,34 @@ def test_callback_attaches_to_a_passwordless_account(
 ) -> None:
     claims = {'email': passwordless_user.email, 'email_verified': True}
     response = sign_in(client, mocked_http, oidc_signer, claims)
-    assert redirect_location(response) == f'{ORIGIN}/'
-    assert link_count(db) == 1
-    assert [account.provider for account in passwordless_user.oauth_accounts] == [
-        'google'
-    ]
+    assert redirect_location(response) == f'{ORIGIN}/login?error=link_required'
+    # Only committed rows survive a rollback.
+    db.session.rollback()
+    assert link_count(db) == 0
+    assert me_from_the_session_cookie(client).status_code == 401
+
+
+def test_an_unlinked_provider_cannot_relink_itself(
+    client: FlaskClient,
+    db: SQLAlchemy,
+    linked_user: User,
+    authenticator: SoftwareAuthenticator,
+    mocked_http: responses.RequestsMock,
+    oidc_signer: OidcSigner,
+) -> None:
+    # A passkey keeps the account reachable once Google goes.
+    persist(authenticator.credential_for(linked_user))
+    assert (
+        redirect_location(sign_in(client, mocked_http, oidc_signer, {})) == f'{ORIGIN}/'
+    )
+    assert client.delete(f'{ACCOUNTS_URL}/google').status_code == 204
+    assert client.post('/api/v1/auth/logout').status_code == 200
+    claims = {'email': linked_user.email, 'email_verified': True}
+    response = sign_in(client, mocked_http, oidc_signer, claims)
+    assert redirect_location(response) == f'{ORIGIN}/login?error=link_required'
+    db.session.rollback()
+    assert link_count(db) == 0
+    assert me_from_the_session_cookie(client).status_code == 401
 
 
 def test_a_second_identity_cannot_attach_by_email(
@@ -444,7 +473,7 @@ def test_a_second_identity_cannot_attach_by_email(
         'email_verified': True,
     }
     response = sign_in(client, mocked_http, oidc_signer, claims)
-    assert redirect_location(response) == f'{ORIGIN}/login?error=already_linked'
+    assert redirect_location(response) == f'{ORIGIN}/login?error=link_required'
     assert link_count(db) == 1
 
 
@@ -509,7 +538,7 @@ def test_a_deactivated_passwordless_account_gains_no_link(
     db.session.commit()
     claims = {'email': passwordless_user.email, 'email_verified': True}
     response = sign_in(client, mocked_http, oidc_signer, claims)
-    assert redirect_location(response) == f'{ORIGIN}/login?error=account_inactive'
+    assert redirect_location(response) == f'{ORIGIN}/login?error=link_required'
     assert link_count(db) == 0
 
 
@@ -980,6 +1009,20 @@ def test_unlink_of_the_last_method_is_409(
     assert response.status_code == 409
     assert response.get_json() == {'error': LAST_METHOD}
     assert len(linked_user.oauth_accounts) == 1
+
+
+def test_unlink_is_allowed_while_a_passkey_remains(
+    client: FlaskClient,
+    linked_user: User,
+    authenticator: SoftwareAuthenticator,
+    mocked_http: responses.RequestsMock,
+    oidc_signer: OidcSigner,
+) -> None:
+    persist(authenticator.credential_for(linked_user))
+    assert (
+        redirect_location(sign_in(client, mocked_http, oidc_signer, {})) == f'{ORIGIN}/'
+    )
+    assert client.delete(f'{ACCOUNTS_URL}/google').status_code == 204
 
 
 def test_unlink_needs_a_session(client: FlaskClient) -> None:

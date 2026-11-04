@@ -15,6 +15,9 @@ filetype==1.2.0
 # the provider's redirect cannot read under SameSite=Strict (ai/auth.md).
 requests==2.34.2
 joserfc==1.7.7
+# Passkeys (ai/auth.md). It brings cbor2, cryptography, pyOpenSSL, pyasn1, and
+# pyasn1-modules.
+webauthn==3.0.1
 psycopg2-binary==2.9.10
 python-dotenv==1.2.4
 gunicorn==23.0.0

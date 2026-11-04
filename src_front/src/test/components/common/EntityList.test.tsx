@@ -47,6 +47,13 @@ describe('EntityList', () => {
         ).toBeInTheDocument()
     })
 
+    it('leaves room at the end of a row for every action', () => {
+        renderList()
+
+        // Two 40 px icon buttons inset 16 px from the edge, where MUI pads for one.
+        expect(screen.getAllByRole('listitem')[0]).toHaveStyle({ paddingRight: '96px' })
+    })
+
     it('calls onAdd when the Add button is clicked', async () => {
         const user = userEvent.setup()
         renderList()

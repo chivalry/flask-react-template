@@ -42,6 +42,14 @@ _MUTATING_METHODS = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 _CROSS_SITE_POST_ENDPOINTS = frozenset({'oauth.callback'})
 """Routes that check their own signed state, because a provider posts to them."""
 
+_SPA_ONLY_GET_ENDPOINTS = frozenset(
+    {'passkeys.login_options', 'passkeys.register_options'}
+)
+"""GET routes that need the header too, because each answer sets a challenge cookie."""
+
+_SPA_ONLY_GET_METHODS = frozenset({'GET', 'HEAD'})
+"""The methods those routes check; ``OPTIONS`` stays exempt, as for every route."""
+
 _JSON_ERROR_MESSAGES = {
     400: 'Bad request',
     401: 'Unauthorized',
@@ -261,11 +269,19 @@ def _register_blueprints(app: Flask) -> None:
     Args:
         app: The application being configured.
     """
-    from src_back.api import audit_logs_bp, auth_bp, health_bp, oauth_bp, users_bp
+    from src_back.api import (
+        audit_logs_bp,
+        auth_bp,
+        health_bp,
+        oauth_bp,
+        passkeys_bp,
+        users_bp,
+    )
 
     app.register_blueprint(health_bp, url_prefix='/api')
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
     app.register_blueprint(oauth_bp, url_prefix='/api/v1/auth/oauth')
+    app.register_blueprint(passkeys_bp, url_prefix='/api/v1/auth/passkeys')
     app.register_blueprint(users_bp, url_prefix='/api/v1/users')
     app.register_blueprint(audit_logs_bp, url_prefix='/api/v1/audit-logs')
 
@@ -335,24 +351,44 @@ def _is_json_path(path: str) -> bool:
     )
 
 
-def _require_requested_with_header() -> ErrorResponse | None:
-    """Refuse a mutating API request that lacks the SPA's X-Requested-With header.
-
-    Defense in depth against cross-site request forgery, under the SameSite
-    session cookie: a form on another site cannot set the header, and a script on
-    another origin cannot send it without a CORS preflight that only the allowed
-    origins pass. ``ai/conventions.md`` explains when a route may be exempted.
-    Routes in ``_CROSS_SITE_POST_ENDPOINTS`` are exempt.
+def _needs_requested_with_header() -> bool:
+    """Decide whether the request must carry the SPA's X-Requested-With header.
 
     Returns:
-        A 403 JSON error envelope for a POST, PUT, PATCH, or DELETE to an ``/api``
-        or ``/uploads`` path that lacks ``X-Requested-With: XMLHttpRequest``,
-        otherwise ``None``, which lets the request through.
+        ``True`` for a POST, PUT, PATCH, or DELETE to an ``/api`` or ``/uploads`` path
+        outside ``_CROSS_SITE_POST_ENDPOINTS``, and for a GET or HEAD of a route in
+        ``_SPA_ONLY_GET_ENDPOINTS``; ``False`` for anything else, ``OPTIONS`` included.
+    """
+    if request.method in _MUTATING_METHODS:
+        return (
+            _is_json_path(request.path)
+            and request.endpoint not in _CROSS_SITE_POST_ENDPOINTS
+        )
+    return (
+        request.method in _SPA_ONLY_GET_METHODS
+        and request.endpoint in _SPA_ONLY_GET_ENDPOINTS
+    )
+
+
+def _require_requested_with_header() -> ErrorResponse | None:
+    """Refuse an API request that lacks the SPA's X-Requested-With header it needs.
+
+    Defense in depth against cross-site request forgery, under the SameSite
+    session cookie: a form or a link on another site cannot set the header, and a
+    script on another origin cannot send it without a CORS preflight that only the
+    allowed origins pass. Every mutating API request needs it, except the routes in
+    ``_CROSS_SITE_POST_ENDPOINTS``, and so does a GET or HEAD of a route in
+    ``_SPA_ONLY_GET_ENDPOINTS``, whose answer another site could otherwise reach by
+    navigation, cookie and all. ``ai/conventions.md`` explains when a route may be
+    exempted.
+
+    Returns:
+        A 403 JSON error envelope for such a request without
+        ``X-Requested-With: XMLHttpRequest``, otherwise ``None``, which lets the request
+        through.
     """
     if (
-        request.method in _MUTATING_METHODS
-        and _is_json_path(request.path)
-        and request.endpoint not in _CROSS_SITE_POST_ENDPOINTS
+        _needs_requested_with_header()
         and request.headers.get('X-Requested-With') != 'XMLHttpRequest'
     ):
         return forbidden('Missing the X-Requested-With header.')

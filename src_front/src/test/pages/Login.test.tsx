@@ -1,3 +1,8 @@
+import {
+    browserSupportsWebAuthn,
+    browserSupportsWebAuthnAutofill,
+    startAuthentication,
+} from '@simplewebauthn/browser'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { AxiosResponse } from 'axios'
@@ -6,13 +11,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { login } from '../../api/auth'
 import { listProviders } from '../../api/oauth'
+import { loginOptions, loginVerify } from '../../api/passkeys'
 import Login from '../../pages/Login'
 import { useAuthStore } from '../../store/auth'
 import type { AuthUser } from '../../types/auth'
 import { adminUser, googleProvider } from '../utils/fixtures'
+import { authenticationResponse, ceremonyError, requestOptions } from '../utils/webauthn'
 
+vi.mock('@simplewebauthn/browser', async (importOriginal) =>
+    (await import('../utils/webauthnMock')).mockWebAuthnBrowser(importOriginal),
+)
 vi.mock('../../api/auth')
 vi.mock('../../api/oauth')
+vi.mock('../../api/passkeys')
+
+/** What the server answers for a passkey it does not accept. */
+const NOT_ACCEPTED = 'That passkey was not accepted.'
 
 // Shows the full location it landed on, so a test can check the query and hash too.
 const RequestedPage = () => {
@@ -48,11 +62,29 @@ const renderLoginAndSignIn = async (state: unknown) => {
     await signInWith(user, 'user@example.com', 'password123')
 }
 
+/** Give the browser passkeys, and answer the button's prompt as given. */
+const passkeyPromptAnswers = (answer: () => Promise<typeof authenticationResponse>) => {
+    vi.mocked(browserSupportsWebAuthn).mockReturnValue(true)
+    vi.mocked(startAuthentication).mockImplementation(({ useBrowserAutofill }) =>
+        useBrowserAutofill ? new Promise(() => undefined) : answer(),
+    )
+}
+
+/** Render the page and press its passkey button. */
+const signInWithPasskey = async () => {
+    const user = userEvent.setup()
+    renderLogin()
+    await user.click(screen.getByRole('button', { name: 'Sign in with a passkey' }))
+}
+
 describe('Login', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         useAuthStore.setState({ user: null, isLoading: false })
         vi.mocked(listProviders).mockReturnValue(new Promise(() => undefined))
+        vi.mocked(browserSupportsWebAuthn).mockReturnValue(false)
+        vi.mocked(browserSupportsWebAuthnAutofill).mockResolvedValue(false)
+        vi.mocked(loginOptions).mockResolvedValue(requestOptions)
     })
 
     it('shows the invalid email message and does not call the API', async () => {
@@ -227,13 +259,108 @@ describe('Login', () => {
         expect(screen.queryByRole('separator')).not.toBeInTheDocument()
     })
 
-    it('hints the email and the current password to the browser', () => {
+    it('hints the email, its passkeys, and the current password to the browser', () => {
         renderLogin()
 
-        expect(screen.getByLabelText('Email')).toHaveAttribute('autocomplete', 'email')
+        expect(screen.getByLabelText('Email')).toHaveAttribute(
+            'autocomplete',
+            'username webauthn',
+        )
         expect(screen.getByLabelText('Password')).toHaveAttribute(
             'autocomplete',
             'current-password',
+        )
+    })
+
+    it('signs in with the passkey button, stores the user, and goes home', async () => {
+        passkeyPromptAnswers(() => Promise.resolve(authenticationResponse))
+        vi.mocked(loginVerify).mockResolvedValue({
+            data: adminUser,
+        } as AxiosResponse<AuthUser>)
+
+        await signInWithPasskey()
+
+        expect(await screen.findByText('Home page')).toBeInTheDocument()
+        expect(loginVerify).toHaveBeenCalledExactlyOnceWith(authenticationResponse)
+        expect(useAuthStore.getState().user).toEqual(adminUser)
+    })
+
+    it('shows the message of a refused passkey in the one alert', async () => {
+        passkeyPromptAnswers(() => Promise.resolve(authenticationResponse))
+        vi.mocked(loginVerify).mockRejectedValue(new Error(NOT_ACCEPTED))
+
+        await signInWithPasskey()
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(NOT_ACCEPTED)
+        expect(screen.getAllByRole('alert')).toHaveLength(1)
+        expect(useAuthStore.getState().user).toBeNull()
+    })
+
+    it('stays on the page, without an alert, after a dismissed prompt', async () => {
+        passkeyPromptAnswers(() =>
+            Promise.reject(
+                ceremonyError('ERROR_PASSTHROUGH_SEE_CAUSE_PROPERTY', 'NotAllowedError'),
+            ),
+        )
+
+        await signInWithPasskey()
+
+        const button = screen.getByRole('button', { name: 'Sign in with a passkey' })
+        await waitFor(() => expect(button).toBeEnabled())
+        expect(startAuthentication).toHaveBeenCalledTimes(1)
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+        expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+        expect(useAuthStore.getState().user).toBeNull()
+    })
+
+    it('signs in with a passkey picked from the email autofill', async () => {
+        vi.mocked(browserSupportsWebAuthn).mockReturnValue(true)
+        vi.mocked(browserSupportsWebAuthnAutofill).mockResolvedValue(true)
+        // The pick renews the offer, whose ceremony waits until the page leaves.
+        vi.mocked(startAuthentication)
+            .mockResolvedValueOnce(authenticationResponse)
+            .mockReturnValue(new Promise(() => undefined))
+        vi.mocked(loginVerify).mockResolvedValue({
+            data: adminUser,
+        } as AxiosResponse<AuthUser>)
+
+        renderLogin()
+
+        expect(await screen.findByText('Home page')).toBeInTheDocument()
+        expect(vi.mocked(startAuthentication).mock.calls[0]).toEqual([
+            { optionsJSON: requestOptions, useBrowserAutofill: true },
+        ])
+        expect(loginVerify).toHaveBeenCalledExactlyOnceWith(authenticationResponse)
+        expect(useAuthStore.getState().user).toEqual(adminUser)
+    })
+
+    it('keeps a refused passkey alert after the renewed autofill loads', async () => {
+        passkeyPromptAnswers(() => Promise.resolve(authenticationResponse))
+        vi.mocked(browserSupportsWebAuthnAutofill).mockResolvedValue(true)
+        vi.mocked(loginVerify).mockRejectedValue(new Error(NOT_ACCEPTED))
+
+        await signInWithPasskey()
+
+        expect(await screen.findByRole('alert')).toHaveTextContent(NOT_ACCEPTED)
+        // The autofill's options, the button's, then the renewed autofill's.
+        await waitFor(() => expect(loginOptions).toHaveBeenCalledTimes(3))
+        await waitFor(() => expect(startAuthentication).toHaveBeenCalledTimes(3))
+        expect(screen.getByRole('alert')).toHaveTextContent(NOT_ACCEPTED)
+    })
+
+    it('orders Sign in, then the passkey button, then the providers', async () => {
+        vi.mocked(browserSupportsWebAuthn).mockReturnValue(true)
+        vi.mocked(listProviders).mockResolvedValue([googleProvider])
+        renderLogin()
+
+        const provider = await screen.findByRole('link', { name: 'Continue with Google' })
+        const submit = screen.getByRole('button', { name: 'Sign in' })
+        const passkey = screen.getByRole('button', { name: 'Sign in with a passkey' })
+        expect(submit.compareDocumentPosition(passkey)).toBe(
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        )
+        expect(passkey.compareDocumentPosition(provider)).toBe(
+            Node.DOCUMENT_POSITION_FOLLOWING,
         )
     })
 })

@@ -14,6 +14,7 @@ from src_back.models.base import BaseMixin
 if TYPE_CHECKING:
     from src_back.models.audit_log import AuditLog
     from src_back.models.oauth_account import OAuthAccount
+    from src_back.models.webauthn_credential import WebAuthnCredential
 
 
 class Role(enum.StrEnum):
@@ -53,9 +54,10 @@ class User(UserMixin, BaseMixin, Base):
     account is stored through :func:`normalize_email`, however the account is
     created or edited. ``password_hash`` is ``None`` for an account a sign-in
     provider created, which has no password; ``oauth_accounts`` holds the providers
-    it can sign in with. ``is_active`` replaces Flask-Login's ``UserMixin.is_active``:
-    a deactivated account keeps the rows that reference it but cannot sign in, and
-    :func:`src_back.app.load_user` ends its session on its next request.
+    it can sign in with, and ``passkeys`` its passkeys. ``is_active`` replaces
+    Flask-Login's ``UserMixin.is_active``: a deactivated account keeps the rows that
+    reference it but cannot sign in, and :func:`src_back.app.load_user` ends its
+    session on its next request.
     """
 
     __tablename__ = 'users'
@@ -73,6 +75,9 @@ class User(UserMixin, BaseMixin, Base):
     # the SQLite test database does not enforce foreign keys.
     audit_entries: Mapped[list['AuditLog']] = relationship(back_populates='changed_by')
     oauth_accounts: Mapped[list['OAuthAccount']] = relationship(
+        back_populates='user', cascade='all, delete-orphan'
+    )
+    passkeys: Mapped[list['WebAuthnCredential']] = relationship(
         back_populates='user', cascade='all, delete-orphan'
     )
 

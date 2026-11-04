@@ -50,10 +50,10 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - Services raise the exceptions in `services/errors.py`, and the handler catches each
   one and answers with its envelope from `utils.py`: `DuplicateRecordError`,
   `RecordInUseError`, `ProtectedRecordError`, and `LastSignInMethodError` with
-  `conflict(str(exc))` (409), `SelfModificationError` with `bad_request(str(exc))`
-  (400), and `InactiveAccountError` with `forbidden(str(exc))` (403). `OAuthError`
-  differs: the provider routes answer it with a redirect carrying its code, and
-  `InactiveAccountError` there with the code `account_inactive`.
+  `conflict(str(exc))` (409), `SelfModificationError` and `PasskeyError` with
+  `bad_request(str(exc))` (400), and `InactiveAccountError` with `forbidden(str(exc))`
+  (403). `OAuthError` differs: the provider routes answer it with a redirect carrying its
+  code, and `InactiveAccountError` there with the code `account_inactive`.
 - A service removes a stored file only after the commit that stops referencing it,
   through `delete_upload()` in `utils.py`, which ignores a file that is already gone:
   in `after_delete` for a deleted record, and after its own commit when an update
@@ -82,16 +82,18 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   `admin_required`, keeps Flask-Login's.
 - Every POST, PUT, PATCH, or DELETE to `/api` or `/uploads` must carry
   `X-Requested-With: XMLHttpRequest`, which the axios client sends on every request;
-  `_require_requested_with_header` in `app.py` answers any other with 403. It is CSRF
-  defense in depth. SameSite cookies keep other sites' requests from carrying the
-  session, but a sibling subdomain counts as the same site, and an older browser may
-  ignore SameSite. A form cannot set a custom header, and a script on another origin
-  cannot send one without a CORS preflight, which only the origins in
-  `CORS_ALLOWED_ORIGINS` pass: production sets it to the site's own origin, while
-  development's `*` passes every origin. A route that must accept a cross-site POST is
-  named in `_CROSS_SITE_POST_ENDPOINTS` in `app.py` and checks its own signed `state`
-  instead; `oauth.callback`, which Sign in with Apple's `form_post` answer reaches (#30),
-  is the only one.
+  `_require_requested_with_header` in `app.py` answers any other with 403. So must a GET
+  or HEAD of an endpoint in `_SPA_ONLY_GET_ENDPOINTS`, the two passkey options routes,
+  because each sets a challenge cookie that a navigation from another site must not
+  replace (`ai/auth.md`). It is CSRF defense in depth. SameSite cookies keep other sites'
+  requests from carrying the session, but a sibling subdomain counts as the same site,
+  and an older browser may ignore SameSite. A form cannot set a custom header, and a
+  script on another origin cannot send one without a CORS preflight, which only the
+  origins in `CORS_ALLOWED_ORIGINS` pass: production sets it to the site's own origin,
+  while development's `*` passes every origin. A route that must accept a cross-site
+  POST is named in `_CROSS_SITE_POST_ENDPOINTS` in `app.py` and checks its own signed
+  `state` instead; `oauth.callback`, which Sign in with Apple's `form_post` answer
+  reaches (#30), is the only one.
 - Accounts are deactivated, never deleted, so the rows that reference them stay
   intact. `complete_login` refuses a deactivated account with `InactiveAccountError`,
   and every caller checks the credential first, so the refusal never tells a stranger that
@@ -147,7 +149,8 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
 - The axios client (`api/client.ts`) uses `baseURL: '/api'`, `withCredentials`, and the
   `X-Requested-With: XMLHttpRequest` header that the backend requires on every request
   that changes data. Its interceptors copy the server's `error` text onto
-  `error.message` and notify the auth store on a 401.
+  `error.message` and notify the auth store on a 401, except from a sign-in step, where a
+  401 is a refused credential (`isSignInStep` in `api/client.ts`).
 - A file download goes through `downloadFile(path, filename)` from `api/downloads.ts`. Its
   `path` is relative to the API base, like every call through the client, so a stored
   file under `/uploads`, outside that base, needs a plain link. Going through the client
@@ -169,7 +172,8 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   error boundary that clears when the path changes, so a failing page, or a page
   whose chunk fails to load, keeps the app bar. `vite.config.ts` groups third-party
   code into the `react`, `mui`, and `forms` vendor chunks; add a large new dependency
-  to one of them in `VENDOR_CHUNKS`.
+  to one of them in `VENDOR_CHUNKS`; a small one that only lazy pages import, such as
+  `@simplewebauthn/browser`, needs none.
 - Admin pages sit behind `AdminRoute`, inside `ProtectedRoute`, which sends non-admins
   to `/`. `pages/AdminPage.tsx` builds its tabs and its descendant routes from one
   `SECTIONS` array, so a new admin screen is one more entry there.
