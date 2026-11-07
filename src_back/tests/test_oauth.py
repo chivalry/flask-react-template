@@ -18,6 +18,7 @@ from src_back.services.oauth import (
     resolve_user,
 )
 from src_back.services.oauth_providers import (
+    APPLE_AUTHORIZE_URL,
     GOOGLE_AUTHORIZE_URL,
     GOOGLE_TOKEN_URL,
     OAuthIdentity,
@@ -26,10 +27,17 @@ from src_back.services.oauth_providers import (
 )
 from src_back.services.oauth_state import code_challenge, new_transaction
 from src_back.services.oidc import HTTP_TIMEOUT_SECONDS
-from src_back.tests.conftest import OAUTH_CLIENT_ID, OAUTH_ENVIRONMENT, PUBLIC_BASE_URL
+from src_back.tests.conftest import (
+    APPLE_CLIENT_ID,
+    APPLE_ENVIRONMENT,
+    OAUTH_CLIENT_ID,
+    OAUTH_ENVIRONMENT,
+    PUBLIC_BASE_URL,
+)
 from src_back.tests.helpers import persist
 
 REDIRECT_URI = f'{PUBLIC_BASE_URL}/api/v1/auth/oauth/google/callback'
+APPLE_REDIRECT_URI = f'{PUBLIC_BASE_URL}/api/v1/auth/oauth/apple/callback'
 
 
 def _google() -> OAuthProvider:
@@ -66,6 +74,22 @@ def test_authorize_url_omits_pkce_without_a_verifier() -> None:
     params = dict(parse_qsl(url.query))
     assert 'code_challenge' not in params
     assert 'code_challenge_method' not in params
+
+
+def test_apples_authorize_url_asks_for_a_form_post_without_pkce() -> None:
+    apple = build_registry(APPLE_ENVIRONMENT, PUBLIC_BASE_URL)['apple']
+    txn = new_transaction('apple', uses_pkce=False, next_path='/', link_user_id=None)
+    url = urlsplit(build_authorize_url(apple, redirect_uri=APPLE_REDIRECT_URI, txn=txn))
+    assert f'{url.scheme}://{url.netloc}{url.path}' == APPLE_AUTHORIZE_URL
+    assert dict(parse_qsl(url.query)) == {
+        'client_id': APPLE_CLIENT_ID,
+        'redirect_uri': APPLE_REDIRECT_URI,
+        'response_type': 'code',
+        'scope': 'name email',
+        'state': txn.state,
+        'nonce': txn.nonce,
+        'response_mode': 'form_post',
+    }
 
 
 def test_exchange_posts_the_code_and_secret(mocked_http: responses.RequestsMock) -> None:

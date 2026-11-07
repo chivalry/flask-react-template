@@ -10,7 +10,7 @@ from flask import Flask
 from flask.testing import FlaskClient
 from flask_sqlalchemy import SQLAlchemy
 from joserfc import jwt
-from joserfc.jwk import KeySet, RSAKey
+from joserfc.jwk import ECKey, KeySet, RSAKey
 from sqlalchemy import ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,8 +20,11 @@ from src_back.extensions import db as _db
 from src_back.models import BaseMixin, OAuthAccount, Role, User
 from src_back.services import oidc
 from src_back.services.oauth_providers import (
+    APPLE_ISSUER,
+    APPLE_JWKS_URI,
     GOOGLE_ISSUERS,
     GOOGLE_JWKS_URI,
+    OAuthProvider,
     build_registry,
 )
 from src_back.tests.helpers import persist
@@ -51,6 +54,23 @@ OAUTH_CLIENT_ID = 'test-client-id'
 OAUTH_ENVIRONMENT = {
     'OAUTH_GOOGLE_CLIENT_ID': OAUTH_CLIENT_ID,
     'OAUTH_GOOGLE_CLIENT_SECRET': 'test-client-secret',
+}
+APPLE_CLIENT_ID = 'com.example.app.web'
+APPLE_TEAM_ID = 'TEAMID1234'
+APPLE_KEY_ID = 'KEYID12345'
+# The test team's Sign in with Apple key, made once per run.
+APPLE_PRIVATE_KEY = ECKey.generate_key('P-256')
+APPLE_ENVIRONMENT = {
+    'OAUTH_APPLE_CLIENT_ID': APPLE_CLIENT_ID,
+    'OAUTH_APPLE_TEAM_ID': APPLE_TEAM_ID,
+    'OAUTH_APPLE_KEY_ID': APPLE_KEY_ID,
+    'OAUTH_APPLE_PRIVATE_KEY': APPLE_PRIVATE_KEY.as_pem(private=True).decode(),
+}
+# What OidcSigner.make_id_token needs to sign as Apple rather than Google.
+APPLE_ID_TOKEN_CLAIMS = {
+    'iss': APPLE_ISSUER,
+    'aud': APPLE_CLIENT_ID,
+    'sub': 'apple-subject',
 }
 
 
@@ -98,8 +118,8 @@ def _clear_smtp_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _clear_oauth_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     # src_back.app loads .env at import, where a developer's real keys would enable
-    # Google in every app a test builds without injecting a registry.
-    for name in OAUTH_ENVIRONMENT:
+    # Google or Apple in every app a test builds without injecting a registry.
+    for name in (*OAUTH_ENVIRONMENT, *APPLE_ENVIRONMENT):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -239,6 +259,24 @@ def oidc_signer(oidc_key: RSAKey, mocked_http: responses.RequestsMock) -> OidcSi
     signer = OidcSigner(oidc_key)
     mocked_http.add(responses.GET, GOOGLE_JWKS_URI, json=signer.public_jwks())
     return signer
+
+
+@pytest.fixture()
+def apple_signer(
+    oidc_signer: OidcSigner, mocked_http: responses.RequestsMock
+) -> OidcSigner:
+    # The same key answers at Apple's JWKS URL; APPLE_ID_TOKEN_CLAIMS makes a token
+    # Apple's.
+    mocked_http.add(responses.GET, APPLE_JWKS_URI, json=oidc_signer.public_jwks())
+    return oidc_signer
+
+
+@pytest.fixture()
+def apple(app: Flask, apple_signer: OidcSigner) -> OAuthProvider:
+    # Apple joins Google in this test's registry, built from the test team's keys.
+    provider = build_registry(APPLE_ENVIRONMENT, PUBLIC_BASE_URL)['apple']
+    app.config['OAUTH_PROVIDERS']['apple'] = provider
+    return provider
 
 
 @pytest.fixture()

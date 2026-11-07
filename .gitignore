@@ -256,3 +256,6 @@ src_back/uploads/*
 
 # Claude Code per-machine settings
 .claude/settings.local.json
+
+# Sign in with Apple's private key; its text goes in .env (ai/auth.md)
+*.p8

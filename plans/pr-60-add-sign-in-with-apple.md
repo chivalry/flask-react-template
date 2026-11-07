@@ -1910,6 +1910,78 @@ which only Python 3.12.0 to 3.12.2 raise within the cap.
   at unlink: the issue defers the first, now #61, and `ai/auth.md` records the other
   two.
 
+## Added during implementation
+
+Chuck approved these on 2026-11-06, after the groups' mutation checks showed decisions
+that no listed test could fail. Each is a test or a sentence; no production code changed.
+
+- `test_oauth_providers.py` gains four guards:
+    - `test_apples_endpoints_are_the_ones_its_discovery_document_lists` pins the
+      authorize, token, and JWKS URLs and the issuer to Apple's discovery document. The
+      other tests import the same constants, so a typo in any of the three URLs passed
+      them all.
+    - `test_apple_stays_off_quietly_without_its_keys` also builds the registry for an
+      http origin with no Apple key. Moving the https check before the check for any key,
+      which would warn at every development start against point 7, passed every test.
+    - `test_apples_warning_names_every_missing_key` and
+      `test_apples_key_warning_names_the_error_class` pin the whole text and the
+      `WARNING` level of two warnings: every missing key, in order, and the bad key's
+      class, for the `ValueError` and `TypeError` that cryptography documents for
+      undecodable data and for an encrypted key. Naming only the first missing key,
+      dropping the class, or logging at `ERROR` passed.
+    - `test_each_exchange_mints_its_own_secret` freezes the clock at `.9` of a second
+      instead of `.5`, where `round()` and `int()` agree, so `iat = round(time.time())`
+      fails every run rather than about 42% of them.
+- `test-provision.sh` asserts the Apple line `provision.sh` prints, as it asserts
+  Google's; deleting the `echo` passed.
+- `test-compose-config.sh` checks that `key.env` is one line. With `%b` in place of `%s`,
+  `printf` writes real line breaks, Compose reads the same key, and the test no longer
+  covered the runbook's one-line form.
+- `ai/auth.md`'s laptop route says the tunnel's https host name is also
+  `PUBLIC_BASE_URL`, which the text implied but did not say.
+
+Survivors left without a test:
+
+- By design, as the plan says: dropping `RecursionError` from `apple_display_name`'s
+  `except`, since Python 3.13.18 raises only at a nesting depth of 9,999 and the cap
+  admits 2,048; dropping an Apple key from `docker/docker-compose.prod.yml`; and removing
+  `*.p8` from either ignore file. With both the cap and the catch removed, a deeply nested
+  `user` field answers 500.
+- Equivalent: widening or dropping `algorithms=` when minting; reading `request.form` or
+  `dict(request.values)` for the callback's parameters, since Apple only posts;
+  `startswith('https')`; `.replace('\\n', '\r\n')` or `.replace('\\n', '')`, both of
+  which cryptography's PEM parser reads; `env.get(name)` without `or ''`; an
+  `object_hook` of `dict`; adding `Co` to the dropped categories; and parsing the key on
+  every exchange instead of once.
+- Not worth pinning: which of two true warnings shows first when keys are missing over
+  http; the https warning's level, which the new tests pin only for the other two;
+  `APPLE_USER_FIELD_LIMIT`'s value and unit, which the boundary test reads from the
+  constant on purpose; that `prod-key.json` came from the production render; blank values
+  in `.env.example`; and the four `unset` names, which matter only in a shell that exports
+  them.
+- Outside this change: `key={0}` in `ProviderLinks` only logs React's duplicate-key
+  warning, and an `OAUTH_APPLE_*` value of spaces counts as set, as Google's keys do.
+
+After the guards, every mutation ran again on scratch copies: 113 of the 138 backend ones
+and 32 of the 44 shell ones are killed, 11 and 2 more than before, and none that was
+killed before survives.
+
+The browser check also showed:
+
+- In Chrome 156, WebKit 27.2, and Firefox 157, every callback arrived as a cross-site POST
+  carrying only `__Host-oauth_txn`, never `session`, even when the browser held one, and
+  its response deleted `__Host-oauth_txn`. `session` was stored `SameSite=Strict`,
+  `Secure`, and `HttpOnly`.
+- The stub verified each client secret on its own, with cryptography and the key's public
+  half: exactly `alg` and `kid` in the header, and `iss`, `sub`, `aud`, `iat`, and an
+  `exp` 300 seconds later.
+- A UTF-8 name, Zoë Núñez, reached `oauth_accounts.display_name` intact, and each link's
+  audit entry has no actor, as "The linking policy" says for a link the callback makes.
+- WebKit never shows `Set-Cookie` to Playwright, so its evidence of the deletion is the
+  server's log of that response and the browser's cookie jar.
+- The only console errors were the 401s from `/me` on a signed-out page load, which this
+  change does not touch.
+
 ## Verification
 
 1. Targeted, while editing: each group's command above.

@@ -6,18 +6,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { listLinkedAccounts, listProviders, unlinkAccount } from '../../../api/oauth'
 import LinkedAccounts from '../../../components/account/LinkedAccounts'
-import type { OAuthProviderInfo } from '../../../types/auth'
 import { findDialog } from '../../utils/dialogQueries'
 import { cancelOpenDialog } from '../../utils/dialogs'
-import { googleProvider, linkedGoogleAccount } from '../../utils/fixtures'
+import { appleProvider, googleProvider, linkedGoogleAccount } from '../../utils/fixtures'
 import { renderWithProviders } from '../../utils/renderWithProviders'
 
 vi.mock('../../../api/oauth')
 
 type UserSession = ReturnType<typeof userEvent.setup>
-
-/** A second provider, which the account has not linked. */
-const appleProvider: OAuthProviderInfo = { name: 'apple', label: 'Apple' }
 
 /** What the server answers when the link is the account's last way to sign in. */
 const LAST_METHOD = 'Add another way to sign in before removing this one.'
