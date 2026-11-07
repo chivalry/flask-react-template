@@ -93,7 +93,7 @@ API handler -> Service -> Model -> Marshmallow schema -> jsonify()
   while development's `*` passes every origin. A route that must accept a cross-site
   POST is named in `_CROSS_SITE_POST_ENDPOINTS` in `app.py` and checks its own signed
   `state` instead; `oauth.callback`, which Sign in with Apple's `form_post` answer
-  reaches (#30), is the only one.
+  reaches, is the only one.
 - Accounts are deactivated, never deleted, so the rows that reference them stay
   intact. `complete_login` refuses a deactivated account with `InactiveAccountError`,
   and every caller checks the credential first, so the refusal never tells a stranger that

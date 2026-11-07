@@ -44,6 +44,10 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID:-}
       OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET:-}
+      OAUTH_APPLE_CLIENT_ID: ${OAUTH_APPLE_CLIENT_ID:-}
+      OAUTH_APPLE_TEAM_ID: ${OAUTH_APPLE_TEAM_ID:-}
+      OAUTH_APPLE_KEY_ID: ${OAUTH_APPLE_KEY_ID:-}
+      OAUTH_APPLE_PRIVATE_KEY: ${OAUTH_APPLE_PRIVATE_KEY:-}
     entrypoint: ['/bin/sh', 'docker/entrypoint.sh']
     volumes:
       - uploads_data:/app/src_back/uploads

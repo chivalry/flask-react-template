@@ -47,6 +47,9 @@ _ACCOUNT_PAGE = '/account'
 _KEEPS_TRANSACTION = frozenset({'unknown_provider', 'expired', 'invalid_state'})
 """Failures another site can cause, which must not end a sign-in in progress."""
 
+_CANCELLED_ERRORS = frozenset({'access_denied', 'user_cancelled_authorize'})
+"""The ``error`` a provider sends when the person declines: OAuth's, and Apple's."""
+
 
 def _find_provider(provider_name: str) -> OAuthProvider | None:
     """Look up an enabled provider.
@@ -163,7 +166,9 @@ def start(provider_name: str) -> BaseResponse:
 def _finish_sign_in(provider: OAuthProvider, transaction: OAuthTransaction) -> User:
     """Check the provider's answer and resolve it to an account.
 
-    The state is compared before anything else in the answer is believed.
+    The state is compared before anything else in the answer is believed. The answer's
+    parameters reach the provider's identity function, which is how Apple's one-time
+    ``user`` field arrives.
 
     Args:
         provider: The provider named in the URL.
@@ -182,7 +187,8 @@ def _finish_sign_in(provider: OAuthProvider, transaction: OAuthTransaction) -> U
         raise OAuthError('invalid_state')
     error = request.values.get('error')
     if error:
-        raise OAuthError('cancelled' if error == 'access_denied' else 'exchange_failed')
+        failure = 'cancelled' if error in _CANCELLED_ERRORS else 'exchange_failed'
+        raise OAuthError(failure)
     code = request.values.get('code')
     if not code:
         raise OAuthError('exchange_failed')
@@ -192,7 +198,9 @@ def _finish_sign_in(provider: OAuthProvider, transaction: OAuthTransaction) -> U
         redirect_uri=redirect_uri(current_app.config['PUBLIC_BASE_URL'], provider.name),
         code_verifier=transaction.code_verifier,
     )
-    identity = provider.fetch_identity(provider, tokens, transaction.nonce)
+    identity = provider.fetch_identity(
+        provider, tokens, transaction.nonce, request.values
+    )
     return resolve_user(identity, link_user_id=transaction.link_user_id)
 
 

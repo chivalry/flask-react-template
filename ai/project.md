@@ -166,16 +166,18 @@ docker compose -f docker-compose.yml -f docker/docker-compose.prod.yml --env-fil
 
 Sign-in providers are off until their keys are set: `build_registry()` in
 `src_back/services/oauth_providers.py` enables Google when `OAUTH_GOOGLE_CLIENT_ID` and
-`OAUTH_GOOGLE_CLIENT_SECRET` are both set and `PUBLIC_BASE_URL` is known. A server
-provisioned before these keys has no such lines, which leaves Google off. `ai/auth.md` has
-the setup steps.
+`OAUTH_GOOGLE_CLIENT_SECRET` are both set and `PUBLIC_BASE_URL` is known, and Sign in
+with Apple when all four `OAUTH_APPLE_*` keys are set and `PUBLIC_BASE_URL` is https,
+warning, once `PUBLIC_BASE_URL` is set, when any `OAUTH_APPLE_*` key is set but Apple
+stays off. A server provisioned before these keys has no such lines, which leaves the
+provider off. `ai/auth.md` has the setup steps.
 
 `src_back/app.py` calls `load_dotenv()` at import, so `.env` values are visible to pytest
 too. A test that depends on an environment variable sets or clears it with
 `monkeypatch` first, as the `FLASK_ENV` and `CORS_ALLOWED_ORIGINS` tests in
 `src_back/tests/test_app.py` do; `conftest.py` clears `APP_ENVIRONMENT`, the `SMTP_*`
-variables, and the `OAUTH_GOOGLE_*` keys for every test, so no test sends mail or
-reaches a provider through a developer's account.
+variables, and the `OAUTH_GOOGLE_*` and `OAUTH_APPLE_*` keys for every test, so no test
+sends mail or reaches a provider through a developer's account.
 
 ## Scheduled Jobs
 

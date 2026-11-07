@@ -88,10 +88,10 @@ modules in the last entry, which come with Python.
   exchange in `src_back/services/oauth.py` and the key fetch in `oidc.py`, each with a
   timeout.
 - **joserfc**: validates a provider's ID token, signature and claims, in
-  `src_back/services/oidc.py`. It brings `cryptography`, and Sign in with Apple's ES256
-  client secret will need it too (#30). Authlib, which uses it, is not installed: its
-  Flask client keeps state in the session, which the provider's redirect cannot read under
-  a `SameSite=Strict` cookie.
+  `src_back/services/oidc.py`. It brings `cryptography`, and also signs Sign in with
+  Apple's ES256 client secrets, in `src_back/services/oauth_providers.py`. Authlib, which
+  uses it, is not installed: its Flask client keeps state in the session, which the
+  provider's redirect cannot read under a `SameSite=Strict` cookie.
 - **webauthn** (py_webauthn): builds the passkey ceremonies' options and verifies the
   browser's answers, in `src_back/services/passkeys.py`. It brings `cbor2`, a Rust
   extension with wheels for macOS on Apple silicon, Linux, and Windows, so an Intel Mac

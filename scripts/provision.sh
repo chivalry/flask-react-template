@@ -126,6 +126,13 @@ SMTP_FROM=
 # https://$DOMAIN/api/v1/auth/oauth/google/callback with the Google client.
 OAUTH_GOOGLE_CLIENT_ID=
 OAUTH_GOOGLE_CLIENT_SECRET=
+# Apple appears once all four of its keys are set. Add
+# https://$DOMAIN/api/v1/auth/oauth/apple/callback to its Services ID's return URLs;
+# the key is the .p8 file's text on one line (ai/auth.md, "Setting up Apple").
+OAUTH_APPLE_CLIENT_ID=
+OAUTH_APPLE_TEAM_ID=
+OAUTH_APPLE_KEY_ID=
+OAUTH_APPLE_PRIVATE_KEY=
 
 # --- Loopback ports published by Compose; host nginx proxies to them -------------
 BACKEND_PORT=5000
@@ -163,6 +170,7 @@ ENV
   echo "    steps that use them."
   echo "    Mail stays off until SMTP_HOST and the other SMTP_* values are filled in."
   echo "    Google sign-in stays off until OAUTH_GOOGLE_* are filled in."
+  echo "    Sign in with Apple stays off until all four OAUTH_APPLE_* are filled in."
   echo "    Fill in ADMIN_EMAIL before the first deploy; that admin signs in with the"
   echo "    generated ADMIN_PASSWORD."
 fi

@@ -158,6 +158,11 @@ assert_contains '^SMTP_FROM=$' "$ENV_FILE"
 assert_contains '^OAUTH_GOOGLE_CLIENT_ID=$' "$ENV_FILE"
 assert_contains '^OAUTH_GOOGLE_CLIENT_SECRET=$' "$ENV_FILE"
 assert_contains '^# https://example\.com/api/v1/auth/oauth/google/callback ' "$ENV_FILE"
+assert_contains '^OAUTH_APPLE_CLIENT_ID=$' "$ENV_FILE"
+assert_contains '^OAUTH_APPLE_TEAM_ID=$' "$ENV_FILE"
+assert_contains '^OAUTH_APPLE_KEY_ID=$' "$ENV_FILE"
+assert_contains '^OAUTH_APPLE_PRIVATE_KEY=$' "$ENV_FILE"
+assert_contains '^# https://example\.com/api/v1/auth/oauth/apple/callback ' "$ENV_FILE"
 # The heredoc is unquoted, so the backups comment names the real directory.
 assert_contains '^# /var/backups/my-app/daily\. ' "$ENV_FILE"
 assert_contains '^POSTGRES_PASSWORD=1{32}$' "$ENV_FILE"
@@ -192,6 +197,7 @@ refute_contains '^sudo reboot$' "$COMMANDS"
 assert_contains 'Log out and back in' "$OUTPUT"
 assert_contains 'Mail stays off until SMTP_HOST' "$OUTPUT"
 assert_contains 'Google sign-in stays off' "$OUTPUT"
+assert_contains 'Sign in with Apple stays off' "$OUTPUT"
 
 # APP_NAME in the environment replaces the clone's name.
 start_test_case

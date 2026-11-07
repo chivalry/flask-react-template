@@ -1,16 +1,37 @@
+import json
+import logging
+import time
 from typing import Any
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
+from joserfc import jwt
+from joserfc.jwk import ECKey, RSAKey
 
 from src_back.services.errors import OAuthError
 from src_back.services.oauth_providers import (
+    APPLE_AUTHORIZE_URL,
+    APPLE_ISSUER,
+    APPLE_JWKS_URI,
+    APPLE_KEYS,
+    APPLE_TOKEN_URL,
+    APPLE_USER_FIELD_LIMIT,
     OAuthIdentity,
     OAuthProvider,
+    apple_client_secret,
+    apple_display_name,
     build_registry,
     id_token_claims,
+    load_private_key,
     redirect_uri,
 )
 from src_back.tests.conftest import (
+    APPLE_CLIENT_ID,
+    APPLE_ENVIRONMENT,
+    APPLE_ID_TOKEN_CLAIMS,
+    APPLE_KEY_ID,
+    APPLE_PRIVATE_KEY,
+    APPLE_TEAM_ID,
     OAUTH_CLIENT_ID,
     OAUTH_ENVIRONMENT,
     PUBLIC_BASE_URL,
@@ -18,6 +39,17 @@ from src_back.tests.conftest import (
 )
 
 NONCE = 'the-nonce'
+LOGGER = 'src_back.services.oauth_providers'
+APPLE_PEM = APPLE_ENVIRONMENT['OAUTH_APPLE_PRIVATE_KEY']
+# Only the public half checks a secret, as at Apple.
+APPLE_PUBLIC_KEY = ECKey.import_key(APPLE_PRIVATE_KEY.as_dict(private=False))
+# Apple's first answer names the person; its email is not the token's.
+FIRST_ANSWER = json.dumps(
+    {
+        'name': {'firstName': 'Maria', 'lastName': 'Ruiz'},
+        'email': 'someone.else@example.com',
+    }
+)
 
 
 def _google() -> OAuthProvider:
@@ -27,7 +59,45 @@ def _google() -> OAuthProvider:
 def _identity(signer: OidcSigner, claims: dict[str, Any]) -> OAuthIdentity:
     provider = _google()
     tokens = {'id_token': signer.make_id_token({'nonce': NONCE, **claims})}
-    return provider.fetch_identity(provider, tokens, NONCE)
+    return provider.fetch_identity(provider, tokens, NONCE, {})
+
+
+def _apple() -> OAuthProvider:
+    return build_registry(APPLE_ENVIRONMENT, PUBLIC_BASE_URL)['apple']
+
+
+def _apple_identity(
+    signer: OidcSigner, claims: dict[str, Any], params: dict[str, str]
+) -> OAuthIdentity:
+    provider = _apple()
+    token = signer.make_id_token({**APPLE_ID_TOKEN_CLAIMS, 'nonce': NONCE, **claims})
+    return provider.fetch_identity(provider, {'id_token': token}, NONCE, params)
+
+
+def _pem(
+    key: ECKey | RSAKey, *, private: bool = True, password: str | None = None
+) -> str:
+    return key.as_pem(private=private, password=password).decode()
+
+
+def _decoded_secret(secret: str) -> jwt.Token:
+    return jwt.decode(secret, APPLE_PUBLIC_KEY, algorithms=['ES256'])
+
+
+def _user_field(name: object) -> str:
+    return json.dumps({'name': name})
+
+
+UNUSABLE_KEYS = {
+    'not-a-key': 'not a key',
+    'truncated': APPLE_PEM[:80],
+    'rsa': _pem(RSAKey.generate_key(2048)),
+    'p-384': _pem(ECKey.generate_key('P-384')),
+    # A curve joserfc has no name for, on which signing raises KeyError.
+    'p-224': _pem(ECKey.import_key(ec.generate_private_key(ec.SECP224R1()))),
+    'public-only': _pem(APPLE_PRIVATE_KEY, private=False),
+    'encrypted': _pem(APPLE_PRIVATE_KEY, password='a passphrase'),
+}
 
 
 def test_google_is_enabled_with_both_keys() -> None:
@@ -111,3 +181,239 @@ def test_a_token_response_without_an_id_token_is_invalid(tokens: dict[str, Any])
     with pytest.raises(OAuthError) as excinfo:
         id_token_claims(_google(), tokens, NONCE)
     assert excinfo.value.code == 'invalid_token'
+
+
+# Sign in with Apple: the registry
+
+
+def test_apple_is_enabled_with_its_four_keys_over_https(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    env = {**OAUTH_ENVIRONMENT, **APPLE_ENVIRONMENT}
+    registry = build_registry(env, PUBLIC_BASE_URL)
+    assert list(registry) == ['google', 'apple']
+    apple = registry['apple']
+    assert apple.label == 'Apple'
+    assert apple.client_id == APPLE_CLIENT_ID
+    assert apple.authorize_url == APPLE_AUTHORIZE_URL
+    assert apple.token_url == APPLE_TOKEN_URL
+    assert apple.issuers == (APPLE_ISSUER,)
+    assert apple.jwks_uri == APPLE_JWKS_URI
+    assert apple.scopes == ('name', 'email')
+    assert apple.uses_pkce is False
+    assert apple.extra_authorize_params == {'response_mode': 'form_post'}
+    assert caplog.messages == []
+
+
+def test_apples_endpoints_are_the_ones_its_discovery_document_lists() -> None:
+    # https://appleid.apple.com/.well-known/openid-configuration, fetched 2026-11-04
+    assert (APPLE_AUTHORIZE_URL, APPLE_TOKEN_URL, APPLE_JWKS_URI, APPLE_ISSUER) == (
+        'https://appleid.apple.com/auth/authorize',
+        'https://appleid.apple.com/auth/token',
+        'https://appleid.apple.com/auth/keys',
+        'https://appleid.apple.com',
+    )
+
+
+def test_apple_stays_off_quietly_without_its_keys(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    assert list(build_registry(OAUTH_ENVIRONMENT, PUBLIC_BASE_URL)) == ['google']
+    assert build_registry(dict.fromkeys(APPLE_KEYS, ''), PUBLIC_BASE_URL) == {}
+    # Development's origin is http, which matters only once an Apple key is set.
+    assert build_registry({}, 'http://localhost:5174') == {}
+    assert caplog.messages == []
+
+
+@pytest.mark.parametrize('missing', APPLE_KEYS)
+def test_apple_stays_off_and_warns_without_one_key(
+    missing: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    assert build_registry({**APPLE_ENVIRONMENT, missing: ''}, PUBLIC_BASE_URL) == {}
+    assert caplog.messages == [f'Sign in with Apple is off: {missing} not set.']
+
+
+def test_apples_warning_names_every_missing_key(caplog: pytest.LogCaptureFixture) -> None:
+    env = {**APPLE_ENVIRONMENT, 'OAUTH_APPLE_TEAM_ID': '', 'OAUTH_APPLE_KEY_ID': ''}
+    assert build_registry(env, PUBLIC_BASE_URL) == {}
+    message = (
+        'Sign in with Apple is off: OAUTH_APPLE_TEAM_ID, OAUTH_APPLE_KEY_ID not set.'
+    )
+    assert caplog.record_tuples == [(LOGGER, logging.WARNING, message)]
+
+
+def test_apple_stays_off_and_warns_over_http(caplog: pytest.LogCaptureFixture) -> None:
+    assert build_registry(APPLE_ENVIRONMENT, 'http://localhost:5174') == {}
+    (message,) = caplog.messages
+    assert message == 'Sign in with Apple is off: PUBLIC_BASE_URL must be https.'
+
+
+@pytest.mark.parametrize('pem', UNUSABLE_KEYS.values(), ids=list(UNUSABLE_KEYS))
+def test_apple_stays_off_and_warns_with_an_unusable_key(
+    pem: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    env = {**APPLE_ENVIRONMENT, 'OAUTH_APPLE_PRIVATE_KEY': pem}
+    assert build_registry(env, PUBLIC_BASE_URL) == {}
+    (message,) = caplog.messages
+    assert message.startswith('Sign in with Apple is off: OAUTH_APPLE_PRIVATE_KEY ')
+
+
+@pytest.mark.parametrize(
+    ('pem', 'error'),
+    [
+        (UNUSABLE_KEYS['not-a-key'], 'ValueError'),
+        (UNUSABLE_KEYS['encrypted'], 'TypeError'),
+    ],
+    ids=['malformed', 'encrypted'],
+)
+def test_apples_key_warning_names_the_error_class(
+    pem: str, error: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    env = {**APPLE_ENVIRONMENT, 'OAUTH_APPLE_PRIVATE_KEY': pem}
+    assert build_registry(env, PUBLIC_BASE_URL) == {}
+    message = (
+        'Sign in with Apple is off: OAUTH_APPLE_PRIVATE_KEY is not a usable P-256 '
+        f'private key ({error}).'
+    )
+    assert caplog.record_tuples == [(LOGGER, logging.WARNING, message)]
+
+
+# Sign in with Apple: the key and the client secret
+
+
+@pytest.mark.parametrize(
+    'value',
+    [APPLE_PEM, APPLE_PEM.replace('\n', '\\n'), APPLE_PEM.replace('\n', '\r\n')],
+    ids=['line-breaks', 'escaped-line-breaks', 'windows-line-breaks'],
+)
+def test_load_private_key_reads_the_p8_files_text(value: str) -> None:
+    assert load_private_key(value).thumbprint() == APPLE_PRIVATE_KEY.thumbprint()
+
+
+def test_the_client_secret_is_what_apple_documents() -> None:
+    before = int(time.time())
+    secret = apple_client_secret(
+        team_id=APPLE_TEAM_ID,
+        client_id=APPLE_CLIENT_ID,
+        key_id=APPLE_KEY_ID,
+        private_key=APPLE_PRIVATE_KEY,
+    )
+    token = _decoded_secret(secret)
+    assert token.header == {'alg': 'ES256', 'kid': APPLE_KEY_ID}
+    assert token.claims['iss'] == APPLE_TEAM_ID
+    assert token.claims['sub'] == APPLE_CLIENT_ID
+    assert token.claims['aud'] == 'https://appleid.apple.com'
+    assert before <= token.claims['iat'] <= int(time.time())
+    assert token.claims['exp'] - token.claims['iat'] == 300
+
+
+def test_the_provider_signs_for_its_services_id_with_the_teams_key() -> None:
+    token = _decoded_secret(_apple().client_secret())
+    assert token.header['kid'] == APPLE_KEY_ID
+    assert token.claims['iss'] == APPLE_TEAM_ID
+    assert token.claims['sub'] == APPLE_CLIENT_ID
+
+
+def test_each_exchange_mints_its_own_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    apple = _apple()
+    monkeypatch.setattr(time, 'time', lambda: 1_800_000_000.9)
+    first = _decoded_secret(apple.client_secret()).claims['iat']
+    monkeypatch.setattr(time, 'time', lambda: 1_800_000_600.9)
+    second = _decoded_secret(apple.client_secret()).claims['iat']
+    assert (first, second) == (1_800_000_000, 1_800_000_600)
+
+
+# Sign in with Apple: the identity and the name
+
+
+def test_apple_identity_reads_the_token_and_the_first_answers_name(
+    apple_signer: OidcSigner,
+) -> None:
+    claims = {'email': 'maria@privaterelay.appleid.com', 'email_verified': 'true'}
+    identity = _apple_identity(apple_signer, claims, {'user': FIRST_ANSWER})
+    # The user field is unsigned, so its email is ignored; the token's decides.
+    assert identity == OAuthIdentity(
+        provider='apple',
+        subject='apple-subject',
+        email='maria@privaterelay.appleid.com',
+        email_verified=True,
+        display_name='Maria Ruiz',
+    )
+
+
+def test_a_returning_apple_sign_in_carries_no_name(apple_signer: OidcSigner) -> None:
+    claims = {'email': 'maria@example.com', 'email_verified': True}
+    assert _apple_identity(apple_signer, claims, {}).display_name is None
+
+
+@pytest.mark.parametrize(
+    ('value', 'verified'),
+    [(True, True), ('true', True), (False, False), ('false', False)],
+    ids=['true', 'text-true', 'false', 'text-false'],
+)
+def test_apples_email_verified_is_text_or_a_boolean(
+    apple_signer: OidcSigner, value: object, *, verified: bool
+) -> None:
+    claims = {'email': 'maria@example.com', 'email_verified': value}
+    assert _apple_identity(apple_signer, claims, {}).email_verified is verified
+
+
+def test_an_empty_apple_email_is_none(apple_signer: OidcSigner) -> None:
+    claims = {'email': '', 'email_verified': 'false'}
+    assert _apple_identity(apple_signer, claims, {}).email is None
+
+
+@pytest.mark.parametrize(
+    ('field', 'name'),
+    [
+        (_user_field({'firstName': 'Maria', 'lastName': 'Ruiz'}), 'Maria Ruiz'),
+        (_user_field({'firstName': 'Maria'}), 'Maria'),
+        (_user_field({'lastName': 'Ruiz'}), 'Ruiz'),
+        (_user_field({'firstName': ' Maria ', 'lastName': '  '}), 'Maria'),
+        (None, None),
+        ('', None),
+        ('not json', None),
+        ('[]', None),
+        (json.dumps({'email': 'maria@example.com'}), None),
+        (_user_field('Maria Ruiz'), None),
+        (_user_field({'firstName': 5, 'lastName': None}), None),
+    ],
+    ids=[
+        'both',
+        'given-only',
+        'family-only',
+        'padded',
+        'missing',
+        'empty',
+        'not-json',
+        'not-an-object',
+        'no-name',
+        'name-not-an-object',
+        'parts-not-text',
+    ],
+)
+def test_apple_display_name(field: str | None, name: str | None) -> None:
+    assert apple_display_name(field) == name
+
+
+def test_an_apple_name_keeps_only_what_a_database_can_store() -> None:
+    # NUL, which PostgreSQL refuses, a tab, and a lone surrogate, which no driver can
+    # encode, are dropped; a zero-width joiner, which some scripts need, stays.
+    joiner = chr(0x200D)
+    given = 'Ma' + chr(0) + 'ria' + joiner
+    family = 'Ru' + chr(9) + 'iz' + chr(0xD800)
+    field = _user_field({'firstName': given, 'lastName': family})
+    assert apple_display_name(field) == 'Maria' + joiner + ' Ruiz'
+    assert apple_display_name(_user_field({'firstName': chr(0)})) is None
+
+
+def test_a_user_field_past_the_limit_is_not_read() -> None:
+    padding = APPLE_USER_FIELD_LIMIT - len(_user_field({'firstName': ''}))
+    longest = _user_field({'firstName': 'M' * padding})
+    assert len(longest) == APPLE_USER_FIELD_LIMIT
+    assert apple_display_name(longest) == 'M' * padding
+    assert apple_display_name(_user_field({'firstName': 'M' * (padding + 1)})) is None
+    # Nesting this deep fits the 25 MB request limit and makes json.loads raise.
+    assert apple_display_name('[' * 100_000 + ']' * 100_000) is None
+    # The deepest nesting the cap lets through; Python 3.12.0 to 3.12.2 refuse it.
+    assert apple_display_name('[' * 2048 + ']' * 2048) is None

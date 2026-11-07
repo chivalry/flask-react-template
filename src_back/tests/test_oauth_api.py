@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import secrets
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
@@ -8,13 +9,19 @@ import responses
 from flask import Flask, g
 from flask.testing import FlaskClient
 from flask_sqlalchemy import SQLAlchemy
+from joserfc import jwt
+from joserfc.jwk import ECKey
 from sqlalchemy import select
 from werkzeug.test import TestResponse
 
 from src_back.models import AuditAction, AuditLog, OAuthAccount, Role, User
 from src_back.services import oauth as oauth_service
 from src_back.services.auth import LAST_METHOD, find_user_by_email
-from src_back.services.oauth_providers import GOOGLE_TOKEN_URL
+from src_back.services.oauth_providers import (
+    APPLE_TOKEN_URL,
+    GOOGLE_TOKEN_URL,
+    OAuthProvider,
+)
 from src_back.services.oauth_state import (
     MAX_NEXT_LENGTH,
     SECURE_COOKIE_NAME,
@@ -22,7 +29,13 @@ from src_back.services.oauth_state import (
     code_challenge,
     read_transaction,
 )
-from src_back.tests.conftest import OAUTH_CLIENT_ID, OidcSigner
+from src_back.tests.conftest import (
+    APPLE_CLIENT_ID,
+    APPLE_ID_TOKEN_CLAIMS,
+    APPLE_PRIVATE_KEY,
+    OAUTH_CLIENT_ID,
+    OidcSigner,
+)
 from src_back.tests.helpers import persist
 from src_back.tests.software_authenticator import SoftwareAuthenticator
 
@@ -38,12 +51,26 @@ VERIFIED: dict[str, Any] = {
     'email_verified': True,
     'name': 'New Person',
 }
+APPLE_CALLBACK_URL = f'{OAUTH_URL}/apple/callback'
+APPLE_EMAIL = 'maria@privaterelay.appleid.com'
+APPLE_VERIFIED: dict[str, Any] = {'email': APPLE_EMAIL, 'email_verified': 'true'}
+# Apple's first answer names the person. Its email differs from the token's on purpose:
+# the field is unsigned, so the account takes the token's.
+FIRST_ANSWER = json.dumps(
+    {'name': {'firstName': 'Maria', 'lastName': 'Ruiz'}, 'email': 'other@example.com'}
+)
 
 
 def begin(
-    client: FlaskClient, *, headers: dict[str, str] | None = None, **query: str
+    client: FlaskClient,
+    *,
+    provider: str = 'google',
+    headers: dict[str, str] | None = None,
+    **query: str,
 ) -> dict[str, str]:
-    response = client.get(START_URL, query_string=query, headers=headers or {})
+    response = client.get(
+        f'{OAUTH_URL}/{provider}/start', query_string=query, headers=headers or {}
+    )
     assert response.status_code == 302
     return dict(parse_qsl(urlsplit(response.headers['Location']).query))
 
@@ -95,6 +122,36 @@ def finish_link(
     return run_callback(client, params)
 
 
+def answer_apple_token_request(
+    mocked_http: responses.RequestsMock, signer: OidcSigner, nonce: str
+) -> None:
+    claims = {**APPLE_ID_TOKEN_CLAIMS, **APPLE_VERIFIED, 'nonce': nonce}
+    id_token = signer.make_id_token(claims)
+    mocked_http.add(
+        responses.POST,
+        APPLE_TOKEN_URL,
+        json={'access_token': 'the-access-token', 'id_token': id_token},
+    )
+
+
+def post_apple_answer(client: FlaskClient, form: dict[str, str]) -> TestResponse:
+    # Apple's answer is a form another site posts, so it carries no X-Requested-With.
+    client.environ_base.pop('HTTP_X_REQUESTED_WITH', None)
+    return client.post(APPLE_CALLBACK_URL, data=form)
+
+
+def sign_in_with_apple(
+    client: FlaskClient,
+    mocked_http: responses.RequestsMock,
+    signer: OidcSigner,
+    **fields: str,
+) -> TestResponse:
+    params = begin(client, provider='apple')
+    answer_apple_token_request(mocked_http, signer, params['nonce'])
+    form = {'code': 'the-code', 'state': params['state'], **fields}
+    return post_apple_answer(client, form)
+
+
 def transaction_in(app: Flask, client: FlaskClient) -> OAuthTransaction:
     cookie = client.get_cookie(SECURE_COOKIE_NAME)
     assert cookie is not None
@@ -112,10 +169,10 @@ def has_transaction_cookie(client: FlaskClient) -> bool:
     return client.get_cookie(SECURE_COOKIE_NAME) is not None
 
 
-def token_request_body(mocked_http: responses.RequestsMock) -> dict[str, str]:
-    call = next(
-        call for call in mocked_http.calls if call.request.url == GOOGLE_TOKEN_URL
-    )
+def token_request_body(
+    mocked_http: responses.RequestsMock, url: str = GOOGLE_TOKEN_URL
+) -> dict[str, str]:
+    call = next(call for call in mocked_http.calls if call.request.url == url)
     body = call.request.body
     assert isinstance(body, str)
     return dict(parse_qsl(body))
@@ -1027,3 +1084,123 @@ def test_unlink_is_allowed_while_a_passkey_remains(
 
 def test_unlink_needs_a_session(client: FlaskClient) -> None:
     assert client.delete(f'{ACCOUNTS_URL}/google').status_code == 401
+
+
+# Sign in with Apple
+
+
+def test_providers_lists_apple_after_google(
+    client: FlaskClient, apple: OAuthProvider
+) -> None:
+    assert client.get(f'{OAUTH_URL}/providers').get_json() == [
+        {'name': 'google', 'label': 'Google'},
+        {'name': 'apple', 'label': 'Apple'},
+    ]
+
+
+def test_apples_start_asks_for_a_form_post_and_keeps_no_verifier(
+    app: Flask, client: FlaskClient, apple: OAuthProvider
+) -> None:
+    params = begin(client, provider='apple')
+    assert params['response_mode'] == 'form_post'
+    assert params['client_id'] == APPLE_CLIENT_ID
+    assert 'code_challenge' not in params
+    assert transaction_in(app, client).code_verifier is None
+
+
+def test_a_first_apple_sign_in_makes_an_account_named_from_the_answer(
+    client: FlaskClient,
+    db: SQLAlchemy,
+    mocked_http: responses.RequestsMock,
+    apple_signer: OidcSigner,
+    apple: OAuthProvider,
+) -> None:
+    response = sign_in_with_apple(client, mocked_http, apple_signer, user=FIRST_ANSWER)
+    assert redirect_location(response) == f'{ORIGIN}/'
+    assert not has_transaction_cookie(client)
+    assert me_from_the_session_cookie(client).get_json()['email'] == APPLE_EMAIL
+    db.session.rollback()
+    link = db.session.query(OAuthAccount).one()
+    assert (link.provider, link.provider_user_id) == ('apple', 'apple-subject')
+    assert (link.email, link.display_name) == (APPLE_EMAIL, 'Maria Ruiz')
+    assert link.user.email == APPLE_EMAIL
+
+
+def test_apples_token_request_carries_a_secret_minted_for_it(
+    client: FlaskClient,
+    mocked_http: responses.RequestsMock,
+    apple_signer: OidcSigner,
+    apple: OAuthProvider,
+) -> None:
+    sign_in_with_apple(client, mocked_http, apple_signer)
+    body = token_request_body(mocked_http, APPLE_TOKEN_URL)
+    assert body['client_id'] == APPLE_CLIENT_ID
+    assert body['redirect_uri'] == f'{ORIGIN}/api/v1/auth/oauth/apple/callback'
+    assert 'code_verifier' not in body
+    public_key = ECKey.import_key(APPLE_PRIVATE_KEY.as_dict(private=False))
+    claims = jwt.decode(body['client_secret'], public_key, algorithms=['ES256']).claims
+    assert claims['sub'] == APPLE_CLIENT_ID
+    assert claims['exp'] - claims['iat'] == 300
+
+
+def test_a_returning_apple_sign_in_keeps_the_first_name(
+    client: FlaskClient,
+    db: SQLAlchemy,
+    mocked_http: responses.RequestsMock,
+    apple_signer: OidcSigner,
+    apple: OAuthProvider,
+) -> None:
+    sign_in_with_apple(client, mocked_http, apple_signer, user=FIRST_ANSWER)
+    response = sign_in_with_apple(client, mocked_http, apple_signer)
+    assert redirect_location(response) == f'{ORIGIN}/'
+    assert me_from_the_session_cookie(client).get_json()['email'] == APPLE_EMAIL
+    db.session.rollback()
+    assert db.session.query(User).count() == 1
+    assert db.session.query(OAuthAccount).one().display_name == 'Maria Ruiz'
+
+
+def test_a_cancelled_apple_sign_in_is_cancelled(
+    client: FlaskClient, mocked_http: responses.RequestsMock, apple: OAuthProvider
+) -> None:
+    params = begin(client, provider='apple')
+    form = {'error': 'user_cancelled_authorize', 'state': params['state']}
+    response = post_apple_answer(client, form)
+    assert redirect_location(response) == f'{ORIGIN}/login?error=cancelled'
+    assert not has_transaction_cookie(client)
+    assert len(mocked_http.calls) == 0
+
+
+def test_an_apple_name_a_database_cannot_store_is_cleaned(
+    client: FlaskClient,
+    db: SQLAlchemy,
+    mocked_http: responses.RequestsMock,
+    apple_signer: OidcSigner,
+    apple: OAuthProvider,
+) -> None:
+    # SQLite cannot encode the surrogate and PostgreSQL refuses the NUL, so either one
+    # reaching the database would fail the callback.
+    name = {'firstName': 'Ma' + chr(0) + 'ria', 'lastName': 'Ruiz' + chr(0xD800)}
+    field = json.dumps({'name': name})
+    response = sign_in_with_apple(client, mocked_http, apple_signer, user=field)
+    assert redirect_location(response) == f'{ORIGIN}/'
+    db.session.rollback()
+    assert db.session.query(OAuthAccount).one().display_name == 'Maria Ruiz'
+
+
+def test_linking_apple_from_the_account_page_keeps_the_name(
+    auth_client: FlaskClient,
+    user: User,
+    db: SQLAlchemy,
+    mocked_http: responses.RequestsMock,
+    apple_signer: OidcSigner,
+    apple: OAuthProvider,
+) -> None:
+    params = begin(auth_client, provider='apple', headers=SAME_ORIGIN, link='1')
+    answer_apple_token_request(mocked_http, apple_signer, params['nonce'])
+    form = {'code': 'the-code', 'state': params['state'], 'user': FIRST_ANSWER}
+    response = post_apple_answer(auth_client, form)
+    assert redirect_location(response) == f'{ORIGIN}/account'
+    db.session.rollback()
+    link = db.session.query(OAuthAccount).one()
+    assert (link.user_id, link.provider) == (user.id, 'apple')
+    assert link.display_name == 'Maria Ruiz'

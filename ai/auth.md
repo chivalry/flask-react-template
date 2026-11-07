@@ -4,7 +4,7 @@
 
 Accounts sign in with an email and a password through `src_back/api/auth.py` and
 `src_back/services/auth.py`, or through a sign-in provider, or with a passkey (both
-below). Sign in with Apple (#30) and Facebook (#31) build on the same groundwork:
+below). Google, Sign in with Apple, and Facebook (#31) build on the same groundwork:
 
 - `User` stores every email through `normalize_email()` in `src_back/models/user.py`
   (trimmed and lowercased), however the account is created or edited, and
@@ -30,7 +30,7 @@ below). Sign in with Apple (#30) and Facebook (#31) build on the same groundwork
   admin. A registered account is an active `user`.
 - Every POST under `/api` must carry `X-Requested-With: XMLHttpRequest`
   (`ai/conventions.md`). A provider's callback may arrive as a cross-site POST without it,
-  as Sign in with Apple's `form_post` will (#30), so `oauth.callback` is exempt and checks
+  as Sign in with Apple's `form_post` does, so `oauth.callback` is exempt and checks
   its signed `state` instead.
 
 An account without a password got its email address from the sign-in provider that
@@ -43,11 +43,13 @@ the account to whoever created it.
 ## Sign-in providers
 
 A `Continue with <provider>` button runs the OAuth 2.0 and OpenID Connect
-authorization-code flow on the backend. No token reaches the browser and none is stored.
-A provider is enabled when its keys are set and `PUBLIC_BASE_URL` is known; with none
-enabled, `/providers` answers `[]` and the sign-in pages show only the password form.
-Google is the first provider. A new one is one `OAuthProvider` and one identity function
-in `src_back/services/oauth_providers.py`.
+authorization-code flow on the backend. No token reaches the browser and none is stored. A
+provider is enabled when its keys are set and `PUBLIC_BASE_URL` is known, and Apple only
+when that is https; with none enabled, `/providers` answers `[]` and the sign-in pages
+show only the password form. Google and Apple are the providers so far. A new one is one
+`OAuthProvider` and one identity function in `src_back/services/oauth_providers.py`. Its
+identity function receives the callback's parameters as well as the token response, which
+is how Apple's first answer delivers the person's name.
 
 ### The flow
 
@@ -62,10 +64,11 @@ in `src_back/services/oauth_providers.py`.
    remains, as when an Account tab outlives a sign-out elsewhere. Without `?link=1`,
    anyone is signing in, even with a live session, which `complete_login` replaces, and
    `next` defaults to `/`. It stores a transaction in the cookie below and redirects to
-   the provider with `state`, `nonce`, and a PKCE challenge.
+   the provider with `state`, `nonce`, and a PKCE challenge for a provider that supports
+   one; Apple documents none.
 3. The provider sends the browser back to `callback`, by GET, or by POST for Sign in with
-   Apple (#30). The callback trusts only the cookie: it compares `state`, exchanges the
-   code, checks the ID token, resolves the account, and calls `complete_login`.
+   Apple. The callback trusts only the cookie: it compares `state`, exchanges the code,
+   checks the ID token, resolves the account, and calls `complete_login`.
 4. It clears the cookie and redirects to `PUBLIC_BASE_URL + next`. A failure redirects to
    `/login?error=<code>`, or `/account?error=<code>` when linking, and the page shows the
    message `src_front/src/utils/oauth.ts` holds for that code.
@@ -85,7 +88,8 @@ in `src_back/services/oauth_providers.py`.
 | `account_inactive` | The account has been deactivated or no longer exists          |
 
 A failed token exchange or key fetch logs a warning; a wrong client secret shows up there
-and nowhere else.
+and nowhere else. OAuth's `access_denied` and Apple's `user_cancelled_authorize` both read
+as `cancelled`.
 
 ### The transaction cookie
 
@@ -143,8 +147,8 @@ email account may have since changed", and it recommends another challenge
 ([Google](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token)).
 So rule 4 can create an account for a stale address, and the real owner's registration
 then answers 409, which is no worse than anyone registering that address today. Under
-rule 5, an account one provider created answers `link_required` to a second provider's
-sign-in (#30, #31) until its owner links that provider from the Account page.
+rule 5, an account one provider created answers `link_required` to another provider's
+sign-in until its owner links that provider from the Account page.
 
 Link mode needs that same-origin request as well as the session, so another site cannot
 start it, and a stale session cannot turn a sign-in into a link. Every link and unlink is
@@ -177,6 +181,74 @@ DELETE FROM oauth_accounts WHERE user_id = <id> AND provider = '<provider>';
    hands a container its values only when it creates one, so run `npm run deploy` on a
    server after changing them. A server provisioned before this has no such lines, which
    leaves Google off.
+
+### Setting up Apple
+
+Sign in with Apple needs a membership in the Apple Developer Program, and Apple accepts
+a return URL only on a domain, never `localhost` or an IP address, over https. So
+`build_registry()` leaves Apple off unless all four keys are set and `PUBLIC_BASE_URL`
+is https, and once `PUBLIC_BASE_URL` is set it logs a warning when some keys are set and
+Apple stays off anyway. Try it on staging (`ai/staging.md`). From a laptop it takes a
+tunnel's https host name, registered with Apple and set as `PUBLIC_BASE_URL`, in front
+of a stack that accepts it: the production stack run from an env file of its own, since
+the dev `.env` cannot start it, or the dev stack once Vite's `server.allowedHosts` lists
+the host name.
+
+1. In Certificates, Identifiers & Profiles, enable Sign in with Apple on an App ID,
+   which becomes the primary App ID for the site. A site without an app still needs one.
+2. Create a Services ID. Its identifier, such as `com.example.web`, is
+   `OAUTH_APPLE_CLIENT_ID`. Enable Sign in with Apple on it, choose the primary App ID,
+   and under Website URLs list each environment's domain and its return URL,
+   `PUBLIC_BASE_URL + /api/v1/auth/oauth/apple/callback`, so that one Services ID serves
+   production and staging. Apple asks for no verification file, and an individual
+   membership can register 10 website URLs, an organization 100 ([Apple][apple-web]).
+3. Create a key with Sign in with Apple enabled for the primary App ID. Its Key ID is
+   `OAUTH_APPLE_KEY_ID`, and its `.p8` file downloads only once. The Team ID shown in
+   the membership details is `OAUTH_APPLE_TEAM_ID`.
+4. Put the `.p8` file's text in `OAUTH_APPLE_PRIVATE_KEY` on one line, in double
+   quotes, with `\n` between its lines. These commands print that line, to paste over
+   the blank one in the server's `.env`:
+
+    ```bash
+    key=$(awk 'NF { printf "%s\\n", $0 }' AuthKey_ABC123DEFG.p8)
+    printf 'OAUTH_APPLE_PRIVATE_KEY="%s"\n' "$key"
+    ```
+
+5. Run `npm run deploy`, or `npm run deploy:staging` on staging, because Compose hands a
+   container its values only when it creates one. Then check the backend's log for a
+   warning that begins `Sign in with Apple is off`. Keep the `.p8` outside the
+   repository; `.gitignore` and `.dockerignore` refuse `*.p8` files as a backstop.
+
+Things to know about Apple:
+
+- Apple sends the person's name only with their first authorization of the site, in
+  the `user` field of its POST, and the link keeps it in `oauth_accounts.display_name`;
+  nothing shows it yet. If that first sign-in fails, as `link_required` does, the name
+  is lost until the person stops using Sign in with Apple for the site in their Apple
+  Account settings and authorizes it again. The field is unsigned, so only the name is
+  read from it, and the email always comes from the ID token.
+- Someone who hides their email signs in with a relay address under
+  `privaterelay.appleid.com`, which matches no account here, so their first sign-in
+  creates a new account instead of answering `link_required`. Someone who already has
+  an account should sign in to it and link Apple from the Account page.
+- Mail to a relay address bounces until the sending domain or address is registered
+  under Sign in with Apple for Email Communication, with SPF or DKIM passing
+  ([Apple][apple-relay]). Nothing in the template mails an account yet.
+- Each token exchange mints its own client secret, good for five minutes, so the
+  server's clock must be right; Ubuntu keeps it synchronized by default, with chrony
+  since 25.10 and `systemd-timesyncd` before. A wrong Team ID or Key ID shows up only as
+  `exchange_failed`, with a 400 from Apple's token endpoint in the backend's log; a wrong
+  client id, or a return URL missing from the Services ID, stops on Apple's own page.
+- Apple documents no PKCE, so the nonce is what ties Apple's ID token to the browser
+  that started the sign-in, and a token without one is refused ([RFC 9700][rfc9700],
+  section 4.5.3.2).
+- Unlinking Apple here does not revoke the site at Apple, which the person does in
+  their Apple Account settings, and Apple's server-to-server notifications, such as a
+  relay address's forwarding being turned off, are not received.
+
+[apple-web]: https://developer.apple.com/help/account/configure-app-capabilities/configure-sign-in-with-apple-for-the-web
+[apple-relay]: https://developer.apple.com/help/account/configure-app-capabilities/configure-private-email-relay-service/
+[rfc9700]: https://www.rfc-editor.org/rfc/rfc9700#section-4.5.3.2
 
 ## Passkeys
 
@@ -307,9 +379,9 @@ sends, is never throttled. Development has no nginx and no limit.
 
 - Every POST under `/api/v1/auth/` shares the budget, including a passkey's answers to
   `/passkeys/login/verify` and `/passkeys/register/verify`, and Sign in with Apple's
-  callback (#30). The passkey options are GETs, so the sign-in page's autofill, which
-  asks for them on every visit and every four minutes after, spends nothing. A passkey
-  sign-in costs one POST, as a password sign-in does.
+  callback, a POST, so an Apple sign-in costs one. The passkey options are GETs, so the
+  sign-in page's autofill, which asks for them on every visit and every four minutes
+  after, spends nothing. A passkey sign-in costs one POST, as a password sign-in does.
 - The limit keys on the address nginx sees. Behind a CDN or another proxy, that is the
   proxy's address, so configure `real_ip_header` and `set_real_ip_from` first.
 - Each app on a host has its own zone, named for `APP_NAME`. The `map` that picks out

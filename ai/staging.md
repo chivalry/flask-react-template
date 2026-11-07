@@ -22,8 +22,9 @@ production in:
   on staging never replaces production's;
 - mail, which stays off: `SMTP_HOST` is blank, because `scripts/copy-production.sh`
   fills staging with production's accounts, and mail to them would reach real people;
-- sign-in providers, which stay off until `OAUTH_GOOGLE_*` is filled in, and need
-  staging's own redirect URI registered with the provider;
+- sign-in providers, which stay off until `OAUTH_GOOGLE_*` or `OAUTH_APPLE_*` is filled
+  in, and need staging's own redirect URI registered with the provider, which for Apple is
+  one more return URL on the same Services ID;
 - access: `STAGING_HTPASSWD` names an htpasswd file, and host nginx then asks for a
   password before it serves any page or API call.
 
@@ -70,11 +71,12 @@ is `my-app-staging`.
     cp .env.staging.example .env && chmod 600 .env
     ```
 
-3. Fill in every blank in `.env` except `SMTP_HOST`, which stays blank so staging sends
-   no mail, and the optional `OAUTH_GOOGLE_*` keys. Generate each secret with
-   `openssl rand -hex 32`, and repeat `POSTGRES_PASSWORD` inside `DATABASE_URL`. Set both
-   `CORS_ALLOWED_ORIGINS` and `PUBLIC_BASE_URL` to `https://<DOMAIN>`. `PRODUCTION_DIR`
-   must name production's clone, and `STAGING_HTPASSWD` the file the next step creates.
+3. Fill in every blank in `.env` except `SMTP_HOST`, which stays blank so staging sends no
+   mail, and the optional `OAUTH_GOOGLE_*` and `OAUTH_APPLE_*` keys. Generate each secret
+   with `openssl rand -hex 32`, and repeat `POSTGRES_PASSWORD` inside `DATABASE_URL`. Set
+   both `CORS_ALLOWED_ORIGINS` and `PUBLIC_BASE_URL` to `https://<DOMAIN>`.
+   `PRODUCTION_DIR` must name production's clone, and `STAGING_HTPASSWD` the file the next
+   step creates.
 4. Create the password file. `openssl passwd -6` asks for the password twice, and
    testers sign in as `tester` with it. The group and mode let nginx, which runs as
    `www-data` on Ubuntu, read the file:
