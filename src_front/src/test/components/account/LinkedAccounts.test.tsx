@@ -8,7 +8,12 @@ import { listLinkedAccounts, listProviders, unlinkAccount } from '../../../api/o
 import LinkedAccounts from '../../../components/account/LinkedAccounts'
 import { findDialog } from '../../utils/dialogQueries'
 import { cancelOpenDialog } from '../../utils/dialogs'
-import { appleProvider, googleProvider, linkedGoogleAccount } from '../../utils/fixtures'
+import {
+    appleProvider,
+    facebookProvider,
+    googleProvider,
+    linkedGoogleAccount,
+} from '../../utils/fixtures'
 import { renderWithProviders } from '../../utils/renderWithProviders'
 
 vi.mock('../../../api/oauth')
@@ -53,16 +58,42 @@ describe('LinkedAccounts', () => {
     })
 
     it('offers to link only the providers not yet linked', async () => {
-        vi.mocked(listProviders).mockResolvedValue([googleProvider, appleProvider])
+        vi.mocked(listProviders).mockResolvedValue([
+            googleProvider,
+            appleProvider,
+            facebookProvider,
+        ])
         renderLinkedAccounts()
 
         expect(await screen.findByRole('link', { name: 'Link Apple' })).toHaveAttribute(
             'href',
             '/api/v1/auth/oauth/apple/start?next=%2Faccount&link=1',
         )
+        expect(screen.getByRole('link', { name: 'Link Facebook' })).toHaveAttribute(
+            'href',
+            '/api/v1/auth/oauth/facebook/start?next=%2Faccount&link=1',
+        )
         expect(
             screen.queryByRole('link', { name: 'Link Google' }),
         ).not.toBeInTheDocument()
+    })
+
+    it('spaces the Link buttons with a gap that a wrapped row keeps', async () => {
+        vi.mocked(listProviders).mockResolvedValue([
+            googleProvider,
+            appleProvider,
+            facebookProvider,
+        ])
+        renderLinkedAccounts()
+
+        // jsdom lays nothing out but applies MUI's styles: with useFlexGap the row spaces
+        // its buttons with a gap, which a wrapped row keeps, instead of left margins.
+        const link = await screen.findByRole('link', { name: 'Link Facebook' })
+        const row = getComputedStyle(link.parentElement!)
+        expect([row.getPropertyValue('flex-wrap'), row.getPropertyValue('gap')]).toEqual([
+            'wrap',
+            '8px',
+        ])
     })
 
     it('says no providers are linked and still offers the link button', async () => {

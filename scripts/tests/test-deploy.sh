@@ -138,6 +138,8 @@ assert_contains '^OAUTH_APPLE_CLIENT_ID=$' "$STAGING_EXAMPLE"
 assert_contains '^OAUTH_APPLE_TEAM_ID=$' "$STAGING_EXAMPLE"
 assert_contains '^OAUTH_APPLE_KEY_ID=$' "$STAGING_EXAMPLE"
 assert_contains '^OAUTH_APPLE_PRIVATE_KEY=$' "$STAGING_EXAMPLE"
+assert_contains '^OAUTH_FACEBOOK_CLIENT_ID=$' "$STAGING_EXAMPLE"
+assert_contains '^OAUTH_FACEBOOK_CLIENT_SECRET=$' "$STAGING_EXAMPLE"
 sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' "$STAGING_EXAMPLE" > "$TEST_DIR/staging-keys"
 assert_contains '^APP_NAME$' "$TEST_DIR/staging-keys"
 while IFS= read -r key; do

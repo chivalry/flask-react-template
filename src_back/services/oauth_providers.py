@@ -7,6 +7,8 @@ is known. A new provider is one :class:`OAuthProvider` and one identity function
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import time
@@ -16,11 +18,12 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
+import requests
 from joserfc import jwt
 from joserfc.jwk import ECKey
 
 from src_back.services.errors import OAuthError
-from src_back.services.oidc import verify_id_token
+from src_back.services.oidc import HTTP_TIMEOUT_SECONDS, verify_id_token
 
 _log = logging.getLogger(__name__)
 
@@ -59,13 +62,28 @@ _UNSTORABLE_CATEGORIES = frozenset({'Cc', 'Cs'})
 """Control characters, NUL among them, which PostgreSQL refuses in text, and lone
 surrogates, which have no UTF-8 form."""
 
+FACEBOOK_GRAPH_VERSION = 'v27.0'
+"""The Graph API version that Facebook's three URLs name. Two years after the next one
+ships, Meta answers calls that name it with the oldest version it still serves
+(``ai/auth.md``, "Setting up Facebook")."""
+
+FACEBOOK_AUTHORIZE_URL = f'https://www.facebook.com/{FACEBOOK_GRAPH_VERSION}/dialog/oauth'
+FACEBOOK_TOKEN_URL = (
+    f'https://graph.facebook.com/{FACEBOOK_GRAPH_VERSION}/oauth/access_token'
+)
+FACEBOOK_PROFILE_URL = f'https://graph.facebook.com/{FACEBOOK_GRAPH_VERSION}/me'
+FACEBOOK_PROFILE_FIELDS = 'id,name,email'
+"""What the profile lookup asks for; ``email`` is missing when the person declined it or
+has no address on Facebook."""
+
 
 @dataclass(frozen=True)
 class OAuthIdentity:
     """Who a provider says signed in.
 
     ``subject`` is the provider's stable id for the person. ``email_verified`` is what
-    the provider claims, which :func:`~src_back.services.oauth.resolve_user` relies on.
+    the provider claims, or for Facebook, which claims nothing, whether it sent an
+    address; :func:`~src_back.services.oauth.resolve_user` relies on it.
     """
 
     provider: str
@@ -83,7 +101,7 @@ class OAuthProvider:
     exchange. ``fetch_identity`` receives the provider, the token response, the
     transaction's nonce, and the parameters the provider's redirect carried, where Apple
     puts its one-time ``user`` field. ``issuers`` is empty and ``jwks_uri`` is ``None``
-    for a provider without ID tokens (#31).
+    for a provider without ID tokens, such as Facebook.
     """
 
     name: str
@@ -248,10 +266,10 @@ def apple_display_name(user_field: str | None) -> str | None:
 
 
 def _storable_text(value: object) -> str:
-    """Keep the text of a name part that every database can store.
+    """Keep the text of a name, or a part of one, that every database can store.
 
     Args:
-        value: The part, which may be any JSON value.
+        value: The name or part, which may be any JSON value.
 
     Returns:
         The text without control characters or lone surrogates, trimmed, or an empty
@@ -443,6 +461,129 @@ def _apple_provider(env: Mapping[str, str], public_base_url: str) -> OAuthProvid
     )
 
 
+def _facebook_profile(access_token: str, app_secret: str) -> dict[str, Any]:
+    """Ask the Graph API whom an access token belongs to.
+
+    The token travels in the ``Authorization`` header, so no URL holds it.
+    ``appsecret_proof`` signs the token with the app secret, which Require App Secret
+    asks of every call. The URL does hold the proof, and ``requests`` copies the URL
+    into its errors, so the warning logs only a refusal's status, or otherwise the
+    error's type.
+
+    Args:
+        access_token: The access token from the code exchange.
+        app_secret: The app's secret.
+
+    Returns:
+        The profile's fields.
+
+    Raises:
+        OAuthError: With ``exchange_failed`` if Facebook cannot be reached, refuses the
+            token, or answers with anything but a JSON object.
+    """
+    proof = hmac.new(app_secret.encode(), access_token.encode(), hashlib.sha256)
+    try:
+        response = requests.get(
+            FACEBOOK_PROFILE_URL,
+            params={
+                'fields': FACEBOOK_PROFILE_FIELDS,
+                'appsecret_proof': proof.hexdigest(),
+            },
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        profile = response.json()
+    except requests.RequestException as exc:
+        failure = type(exc).__name__ if exc.response is None else exc.response.status_code
+        _log.warning('Asking Facebook who signed in failed: %s', failure)
+        raise OAuthError('exchange_failed') from exc
+    if not isinstance(profile, dict):
+        raise OAuthError('exchange_failed')
+    return profile
+
+
+def _facebook_identity(
+    provider: OAuthProvider,
+    tokens: Mapping[str, Any],
+    nonce: str,
+    callback_params: Mapping[str, str],
+) -> OAuthIdentity:
+    """Read who signed in from the Facebook profile the access token unlocks.
+
+    Facebook Login issues no ID token, so the access token is spent on one profile lookup
+    and kept nowhere. An email Facebook returns counts as verified. Without one, because
+    the person declined it or has no address there, only a returning sign-in or a link
+    succeeds; a first sign-in is ``email_required``.
+
+    Args:
+        provider: The Facebook provider.
+        tokens: The token response.
+        nonce: The transaction's nonce, which nothing from Facebook carries.
+        callback_params: The callback's parameters, of which Facebook's needs none.
+
+    Returns:
+        The identity the profile names.
+
+    Raises:
+        OAuthError: With ``exchange_failed`` if the token response holds no access token
+            or the profile names no one.
+    """
+    access_token = tokens.get('access_token')
+    if not isinstance(access_token, str) or not access_token:
+        raise OAuthError('exchange_failed')
+    profile = _facebook_profile(access_token, provider.client_secret())
+    subject = profile.get('id')
+    if not isinstance(subject, str) or not subject:
+        raise OAuthError('exchange_failed')
+    email = profile.get('email')
+    if not isinstance(email, str) or not email:
+        email = None
+    return OAuthIdentity(
+        provider=provider.name,
+        subject=subject,
+        email=email,
+        email_verified=email is not None,
+        display_name=_storable_text(profile.get('name')) or None,
+    )
+
+
+def _facebook_provider(env: Mapping[str, str]) -> OAuthProvider | None:
+    """Build the Facebook provider when its keys are set.
+
+    Facebook Login is OAuth 2.0 without OpenID Connect, so there are no issuers or keys.
+    Meta documents PKCE only for an OpenID Connect variant it calls in testing, so none
+    is sent, and the signed ``state`` alone ties the answer to the browser.
+    ``auth_type=rerequest`` asks again for a permission the person declined before;
+    without it, someone who once declined their email would get ``email_required`` at
+    every sign-in.
+
+    Args:
+        env: The environment.
+
+    Returns:
+        The provider, or ``None`` unless both keys are set.
+    """
+    client_id = env.get('OAUTH_FACEBOOK_CLIENT_ID')
+    client_secret = env.get('OAUTH_FACEBOOK_CLIENT_SECRET')
+    if not client_id or not client_secret:
+        return None
+    return OAuthProvider(
+        name='facebook',
+        label='Facebook',
+        authorize_url=FACEBOOK_AUTHORIZE_URL,
+        token_url=FACEBOOK_TOKEN_URL,
+        scopes=('public_profile', 'email'),
+        uses_pkce=False,
+        client_id=client_id,
+        client_secret=lambda: client_secret,
+        extra_authorize_params={'auth_type': 'rerequest'},
+        fetch_identity=_facebook_identity,
+        issuers=(),
+        jwks_uri=None,
+    )
+
+
 def build_registry(
     env: Mapping[str, str], public_base_url: str | None
 ) -> dict[str, OAuthProvider]:
@@ -458,5 +599,9 @@ def build_registry(
     """
     if not public_base_url:
         return {}
-    candidates = (_google_provider(env), _apple_provider(env, public_base_url))
+    candidates = (
+        _google_provider(env),
+        _apple_provider(env, public_base_url),
+        _facebook_provider(env),
+    )
     return {provider.name: provider for provider in candidates if provider is not None}

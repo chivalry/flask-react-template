@@ -65,7 +65,12 @@ function LinkedProviders(props: LinkedProvidersProps) {
                     </ListItem>
                 ))}
             </List>
-            <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap' }}>
+            <Stack
+                direction="row"
+                spacing={1}
+                useFlexGap
+                sx={{ mt: 2, flexWrap: 'wrap' }}
+            >
                 {unlinked.map(({ name, label }) => (
                     <Button key={name} variant="outlined" href={linkUrl(name)}>
                         Link {label}

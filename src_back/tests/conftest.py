@@ -72,6 +72,12 @@ APPLE_ID_TOKEN_CLAIMS = {
     'aud': APPLE_CLIENT_ID,
     'sub': 'apple-subject',
 }
+FACEBOOK_CLIENT_ID = '1234567890123456'
+FACEBOOK_CLIENT_SECRET = 'facebook-app-secret'
+FACEBOOK_ENVIRONMENT = {
+    'OAUTH_FACEBOOK_CLIENT_ID': FACEBOOK_CLIENT_ID,
+    'OAUTH_FACEBOOK_CLIENT_SECRET': FACEBOOK_CLIENT_SECRET,
+}
 
 
 class Widget(BaseMixin, Base):
@@ -117,9 +123,9 @@ def _clear_smtp_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _clear_oauth_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    # src_back.app loads .env at import, where a developer's real keys would enable
-    # Google or Apple in every app a test builds without injecting a registry.
-    for name in (*OAUTH_ENVIRONMENT, *APPLE_ENVIRONMENT):
+    # src_back.app loads .env at import, where a developer's real keys would enable a
+    # provider in every app a test builds without injecting a registry.
+    for name in (*OAUTH_ENVIRONMENT, *APPLE_ENVIRONMENT, *FACEBOOK_ENVIRONMENT):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -276,6 +282,15 @@ def apple(app: Flask, apple_signer: OidcSigner) -> OAuthProvider:
     # Apple joins Google in this test's registry, built from the test team's keys.
     provider = build_registry(APPLE_ENVIRONMENT, PUBLIC_BASE_URL)['apple']
     app.config['OAUTH_PROVIDERS']['apple'] = provider
+    return provider
+
+
+@pytest.fixture()
+def facebook(app: Flask, mocked_http: responses.RequestsMock) -> OAuthProvider:
+    # Facebook joins Google in this test's registry. Every call it makes goes to
+    # mocked_http, which refuses one it was not given, so no test reaches Meta.
+    provider = build_registry(FACEBOOK_ENVIRONMENT, PUBLIC_BASE_URL)['facebook']
+    app.config['OAUTH_PROVIDERS']['facebook'] = provider
     return provider
 
 

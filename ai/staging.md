@@ -22,9 +22,11 @@ production in:
   on staging never replaces production's;
 - mail, which stays off: `SMTP_HOST` is blank, because `scripts/copy-production.sh`
   fills staging with production's accounts, and mail to them would reach real people;
-- sign-in providers, which stay off until `OAUTH_GOOGLE_*` or `OAUTH_APPLE_*` is filled
-  in, and need staging's own redirect URI registered with the provider, which for Apple is
-  one more return URL on the same Services ID;
+- sign-in providers, which stay off until `OAUTH_GOOGLE_*`, `OAUTH_APPLE_*`, or
+  `OAUTH_FACEBOOK_*` is filled in, and need staging's own redirect URI registered with
+  the provider, which for Apple is one more return URL on the same Services ID, and for
+  Facebook the Valid OAuth Redirect URI of a test app of production's Meta app, whose
+  ids match production's, so the copied links still sign in (`ai/auth.md`);
 - access: `STAGING_HTPASSWD` names an htpasswd file, and host nginx then asks for a
   password before it serves any page or API call.
 
@@ -72,11 +74,11 @@ is `my-app-staging`.
     ```
 
 3. Fill in every blank in `.env` except `SMTP_HOST`, which stays blank so staging sends no
-   mail, and the optional `OAUTH_GOOGLE_*` and `OAUTH_APPLE_*` keys. Generate each secret
-   with `openssl rand -hex 32`, and repeat `POSTGRES_PASSWORD` inside `DATABASE_URL`. Set
-   both `CORS_ALLOWED_ORIGINS` and `PUBLIC_BASE_URL` to `https://<DOMAIN>`.
-   `PRODUCTION_DIR` must name production's clone, and `STAGING_HTPASSWD` the file the next
-   step creates.
+   mail, and the optional `OAUTH_GOOGLE_*`, `OAUTH_APPLE_*`, and `OAUTH_FACEBOOK_*` keys.
+   Generate each secret with `openssl rand -hex 32`, and repeat `POSTGRES_PASSWORD`
+   inside `DATABASE_URL`. Set both `CORS_ALLOWED_ORIGINS` and `PUBLIC_BASE_URL` to
+   `https://<DOMAIN>`. `PRODUCTION_DIR` must name production's clone, and
+   `STAGING_HTPASSWD` the file the next step creates.
 4. Create the password file. `openssl passwd -6` asks for the password twice, and
    testers sign in as `tester` with it. The group and mode let nginx, which runs as
    `www-data` on Ubuntu, read the file:
@@ -175,10 +177,11 @@ Production is only read. In order, the script:
 
 Testers then sign in to staging with their production passwords. An account with no
 password, which a sign-in provider created, can sign in there only when staging has that
-provider's keys. Passkeys copy too, but none works there: each is bound to production's
-host name, and staging has its own, so a tester adds a passkey on staging to try one. An
-account whose only way in is a passkey cannot sign in to staging until an admin there sets
-it a password.
+provider's keys; for Facebook, those of a test app of production's app, on which the
+tester also needs a role. Passkeys copy too, but none works there: each is bound to
+production's host name, and staging has its own, so a tester adds a passkey on staging
+to try one. An account whose only way in is a passkey cannot sign in to staging until an
+admin there sets it a password.
 
 The copy holds every account's email and password hash, so staging must stay behind its
 password. The script refuses until staging's installed nginx site asks for one; set

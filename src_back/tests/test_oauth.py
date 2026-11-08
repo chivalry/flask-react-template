@@ -19,6 +19,7 @@ from src_back.services.oauth import (
 )
 from src_back.services.oauth_providers import (
     APPLE_AUTHORIZE_URL,
+    FACEBOOK_AUTHORIZE_URL,
     GOOGLE_AUTHORIZE_URL,
     GOOGLE_TOKEN_URL,
     OAuthIdentity,
@@ -30,6 +31,8 @@ from src_back.services.oidc import HTTP_TIMEOUT_SECONDS
 from src_back.tests.conftest import (
     APPLE_CLIENT_ID,
     APPLE_ENVIRONMENT,
+    FACEBOOK_CLIENT_ID,
+    FACEBOOK_ENVIRONMENT,
     OAUTH_CLIENT_ID,
     OAUTH_ENVIRONMENT,
     PUBLIC_BASE_URL,
@@ -38,6 +41,7 @@ from src_back.tests.helpers import persist
 
 REDIRECT_URI = f'{PUBLIC_BASE_URL}/api/v1/auth/oauth/google/callback'
 APPLE_REDIRECT_URI = f'{PUBLIC_BASE_URL}/api/v1/auth/oauth/apple/callback'
+FACEBOOK_REDIRECT_URI = f'{PUBLIC_BASE_URL}/api/v1/auth/oauth/facebook/callback'
 
 
 def _google() -> OAuthProvider:
@@ -89,6 +93,24 @@ def test_apples_authorize_url_asks_for_a_form_post_without_pkce() -> None:
         'state': txn.state,
         'nonce': txn.nonce,
         'response_mode': 'form_post',
+    }
+
+
+def test_facebooks_authorize_url_asks_again_for_a_declined_email_without_pkce() -> None:
+    facebook = build_registry(FACEBOOK_ENVIRONMENT, PUBLIC_BASE_URL)['facebook']
+    txn = new_transaction('facebook', uses_pkce=False, next_path='/', link_user_id=None)
+    url = urlsplit(
+        build_authorize_url(facebook, redirect_uri=FACEBOOK_REDIRECT_URI, txn=txn)
+    )
+    assert f'{url.scheme}://{url.netloc}{url.path}' == FACEBOOK_AUTHORIZE_URL
+    assert dict(parse_qsl(url.query)) == {
+        'client_id': FACEBOOK_CLIENT_ID,
+        'redirect_uri': FACEBOOK_REDIRECT_URI,
+        'response_type': 'code',
+        'scope': 'public_profile email',
+        'state': txn.state,
+        'nonce': txn.nonce,
+        'auth_type': 'rerequest',
     }
 
 

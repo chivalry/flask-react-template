@@ -4,7 +4,7 @@
 
 Accounts sign in with an email and a password through `src_back/api/auth.py` and
 `src_back/services/auth.py`, or through a sign-in provider, or with a passkey (both
-below). Google, Sign in with Apple, and Facebook (#31) build on the same groundwork:
+below). Google, Sign in with Apple, and Facebook build on the same groundwork:
 
 - `User` stores every email through `normalize_email()` in `src_back/models/user.py`
   (trimmed and lowercased), however the account is created or edited, and
@@ -34,22 +34,25 @@ below). Google, Sign in with Apple, and Facebook (#31) build on the same groundw
   its signed `state` instead.
 
 An account without a password got its email address from the sign-in provider that
-created it, which verified the address. No sign-in attaches a provider to an existing
-account by its email unless `AUTO_LINK_BY_EMAIL` is on ("The linking policy"). A project
-that turns it on must also verify the address of every account created another way, such
-as by an invitation or a passkey-first sign-up, or linking a provider by email would hand
-the account to whoever created it.
+created it: Google and Apple say they verified it, and Facebook's address is taken as
+verified though Meta never says so ("The linking policy"). No sign-in attaches a provider
+to an existing account by its email unless `AUTO_LINK_BY_EMAIL` is on. A project that
+turns it on must also verify every address nobody has verified yet, such as one from
+Facebook, an invitation, or a passkey-first sign-up, or linking a provider by email would
+hand the account to whoever created it.
 
 ## Sign-in providers
 
-A `Continue with <provider>` button runs the OAuth 2.0 and OpenID Connect
-authorization-code flow on the backend. No token reaches the browser and none is stored. A
-provider is enabled when its keys are set and `PUBLIC_BASE_URL` is known, and Apple only
-when that is https; with none enabled, `/providers` answers `[]` and the sign-in pages
-show only the password form. Google and Apple are the providers so far. A new one is one
-`OAuthProvider` and one identity function in `src_back/services/oauth_providers.py`. Its
-identity function receives the callback's parameters as well as the token response, which
-is how Apple's first answer delivers the person's name.
+A `Continue with <provider>` button runs the OAuth 2.0 authorization-code flow on the
+backend, with OpenID Connect where the provider offers it. No token reaches the browser
+and none is stored. A provider is enabled when its keys are set and `PUBLIC_BASE_URL` is
+known, and Apple only when that is https; with none enabled, `/providers` answers `[]`
+and the sign-in pages show only the password form. Google, Apple, and Facebook are the
+providers so far, listed in that order. A new one is one `OAuthProvider` and one identity
+function in `src_back/services/oauth_providers.py`. Its identity function receives the
+callback's parameters as well as the token response, which is how Apple's first answer
+delivers the person's name; Facebook's, which gets no ID token, spends the access token
+on one profile lookup.
 
 ### The flow
 
@@ -65,10 +68,11 @@ is how Apple's first answer delivers the person's name.
    anyone is signing in, even with a live session, which `complete_login` replaces, and
    `next` defaults to `/`. It stores a transaction in the cookie below and redirects to
    the provider with `state`, `nonce`, and a PKCE challenge for a provider that supports
-   one; Apple documents none.
+   one; Apple documents none, and Facebook one only for a flow it calls in testing.
 3. The provider sends the browser back to `callback`, by GET, or by POST for Sign in with
    Apple. The callback trusts only the cookie: it compares `state`, exchanges the code,
-   checks the ID token, resolves the account, and calls `complete_login`.
+   checks the ID token, or for Facebook asks the Graph API whose access token it got,
+   resolves the account, and calls `complete_login`.
 4. It clears the cookie and redirects to `PUBLIC_BASE_URL + next`. A failure redirects to
    `/login?error=<code>`, or `/account?error=<code>` when linking, and the page shows the
    message `src_front/src/utils/oauth.ts` holds for that code.
@@ -79,7 +83,7 @@ is how Apple's first answer delivers the person's name.
 | `cancelled`        | The person declined at the provider                           |
 | `invalid_state`    | The answer or link request does not belong to this browser    |
 | `expired`          | The transaction's cookie is gone or more than ten minutes old |
-| `exchange_failed`  | The provider refused the code or could not be reached         |
+| `exchange_failed`  | The provider refused the code or token, or was unreachable    |
 | `invalid_token`    | The ID token, or the keys to check it, failed validation      |
 | `email_required`   | The provider gave no email                                    |
 | `email_unverified` | The provider has not verified the email                       |
@@ -87,19 +91,21 @@ is how Apple's first answer delivers the person's name.
 | `already_linked`   | The identity, or the account's slot for it, is already taken  |
 | `account_inactive` | The account has been deactivated or no longer exists          |
 
-A failed token exchange or key fetch logs a warning; a wrong client secret shows up there
-and nowhere else. OAuth's `access_denied` and Apple's `user_cancelled_authorize` both read
-as `cancelled`.
+A failed token exchange, key fetch, or Facebook profile lookup logs a warning; a wrong
+client secret shows up there and nowhere else. OAuth's `access_denied`, which Facebook
+sends too, and Apple's `user_cancelled_authorize` both read as `cancelled`.
 
 ### The transaction cookie
 
-Production's session cookie is `SameSite=Strict`, and browsers never send such a cookie on
-a navigation another site started, which is what the provider's redirect is. There is no
-Redis, and gunicorn's workers share no memory. So `src_back/services/oauth_state.py` keeps
-the transaction in a cookie of its own: signed with `SECRET_KEY`, `HttpOnly`, and good for
-ten minutes. It holds nothing the browser's owner should not see. The callback's response
-stores the session cookie. The browser may leave it off the redirect that follows, which
-is harmless, because the SPA's `/me` call is same-site.
+Production's session cookie is `SameSite=Strict`, so the callback cannot count on it.
+Browsers withhold such a cookie from a navigation another site started, such as a click
+on the provider's page, and Firefox and WebKit withhold it when the provider redirects at
+once, though Chrome 156 then sends it. There is no Redis, and gunicorn's workers share no
+memory. So `src_back/services/oauth_state.py` keeps the transaction in a cookie of its
+own: signed with `SECRET_KEY`, `HttpOnly`, and good for ten minutes. It holds nothing the
+browser's owner should not see. The callback's response stores the session cookie. The
+browser may leave it off the redirect that follows, which is harmless, because the SPA's
+`/me` call is same-site.
 
 Over https the cookie is `__Host-oauth_txn`, with `SameSite=None; Secure` and `Path=/`.
 `SameSite=None` lets a cross-site POST carry it. The signature proves this server issued a
@@ -119,7 +125,8 @@ finish after it.
 
 The callback's GET is not throttled, because nginx counts only POSTs. One valid cookie can
 replay it for ten minutes, and each replay holds a sync worker for a round trip to the
-provider. A `limit_req` for it needs a location per provider, which is its own issue.
+provider, or two to Facebook. A `limit_req` for it needs a location per provider, which
+is its own issue.
 
 ### The linking policy
 
@@ -150,17 +157,24 @@ then answers 409, which is no worse than anyone registering that address today. 
 rule 5, an account one provider created answers `link_required` to another provider's
 sign-in until its owner links that provider from the Account page.
 
+Facebook sends no `email_verified`. Its profile holds "The User's primary email address
+listed on their profile", left out when "no valid email address is available"
+([Meta][fb-user]), and the template counts an address it returns as verified, though
+Meta never calls it that. So rule 4 takes Facebook's word as it takes Google's, and rule
+5 still refuses an address that an account holds. A project that turns on
+`AUTO_LINK_BY_EMAIL` would take that word for linking as well.
+
 Link mode needs that same-origin request as well as the session, so another site cannot
 start it, and a stale session cannot turn a sign-in into a link. Every link and unlink is
-audited in `oauth_accounts`, admin-only, and a link made in the callback has no actor in
-production, because the session does not reach it there. Unlinking the last way to sign in
-is a 409.
+audited in `oauth_accounts`, admin-only. A link made in the callback has an actor only
+when the browser sent the session there, which production's cookie mostly prevents ("The
+transaction cookie"). Unlinking the last way to sign in is a 409.
 
 Linking asks for no password or other fresh proof, and a link survives a password change.
 To clear a compromised account, deactivate it and read its links' history on the Audit
 tab. Filter by the `oauth_accounts` table rather than by user, because a link made in the
-production callback has no actor, and match each entry's `user_id` to the account. Then
-remove any link its owner does not recognize in a database shell before reactivating it:
+production callback may have no actor, and match each entry's `user_id` to the account.
+Before reactivating it, remove any link its owner does not recognize in a database shell:
 
 ```sql
 DELETE FROM oauth_accounts WHERE user_id = <id> AND provider = '<provider>';
@@ -249,6 +263,115 @@ Things to know about Apple:
 [apple-web]: https://developer.apple.com/help/account/configure-app-capabilities/configure-sign-in-with-apple-for-the-web
 [apple-relay]: https://developer.apple.com/help/account/configure-app-capabilities/configure-private-email-relay-service/
 [rfc9700]: https://www.rfc-editor.org/rfc/rfc9700#section-4.5.3.2
+
+### Setting up Facebook
+
+Facebook Login for the web is OAuth 2.0 without OpenID Connect. The backend trades the
+code for an access token and spends it on one Graph API call,
+`GET /me?fields=id,name,email`, with the token in the `Authorization` header and
+`appsecret_proof`, the token's HMAC-SHA256 under the app secret. `build_registry()`
+enables Facebook once both of its keys are set, over plain http too, so the dev stack
+can try it through a test app, which never leaves Development mode.
+
+1. In Meta for Developers, create a Consumer app with the Facebook Login use case. It is
+   production's app, and steps 2 to 4 set it up.
+2. In the use case's Facebook Login settings, add production's Valid OAuth Redirect URI,
+   `PUBLIC_BASE_URL + /api/v1/auth/oauth/facebook/callback`. Strict Mode, which every
+   app must keep on, matches each URI exactly, and Enforce HTTPS, on for every app made
+   since March 2018, refuses plain http ([Meta][fb-security]).
+3. In App settings, Basic, the App ID is `OAUTH_FACEBOOK_CLIENT_ID` and the App secret
+   `OAUTH_FACEBOOK_CLIENT_SECRET`. Going Live needs the Display Name, Contact Email,
+   Terms of Service URL, App Icon, Category, and App Purpose there ([Meta][fb-basic]).
+   Fill in the Privacy Policy URL as well: Meta requires a data deletion callback or an
+   instructions URL, and a privacy policy that says how to ask for deletion
+   ([Meta][fb-deletion]). The template has no callback, so point the instructions URL
+   at that part of the policy, which Basic Settings allows.
+4. In App settings, Advanced, turn on Require App Secret. Every Graph API call already
+   comes from the backend with `appsecret_proof`, so the setting costs nothing, and an
+   access token that leaks cannot then call the Graph API as this app.
+5. Create a test app for staging and another for development: in the upper-left corner
+   of the dashboard, open the app menu and choose Create Test App ([Meta][fb-test-apps]).
+   A test app copies the parent's settings as they stand when it is made, so make each
+   after steps 2 to 4, then replace its Valid OAuth Redirect URIs: staging's test app
+   takes staging's callback. The development one takes none, because Meta's dashboard
+   said in 2021 that `http://localhost` redirects are allowed "automatically" in
+   Development mode, where a test app always is ([quoted here][fb-localhost]); if
+   Facebook's page instead says the URL is blocked, put the dev stack behind an https
+   tunnel, as "Setting up Apple" describes, and register that callback. Each test app has
+   its own App ID and secret, and its "User IDs are scoped to the parent app", while a
+   person's `id` is otherwise "unique to the app and cannot be used by other apps"
+   ([Meta][fb-user]). So the links staging copies from production still match there,
+   and production's secret stays off laptops and staging.
+6. Put each app's keys in its environment's `.env`: production's app on production, and
+   each test app on its own environment. Compose hands a container its values only when
+   it creates one, so run `npm run deploy` on a server, or `npm run deploy:staging` on
+   staging, after changing them. A server provisioned before this has no such lines,
+   which leaves Facebook off.
+7. Until production's app is Live and both `email` and `public_profile` have Advanced
+   Access, only people with a role on it, such as its administrators, developers, and
+   testers, can sign in ([Meta][fb-modes]), which suits an internal project. Meta
+   approves a new Consumer app for Advanced Access to both but leaves them at Standard
+   Access until someone switches them, and says "Business Verification is required to
+   get Advanced Access" ([Meta][fb-access]), though going Live does not need it, so
+   expect to complete it. Then switch the app to Live. A test app never goes Live: it
+   inherits the parent's administrators, and anyone else who signs in through it, such
+   as a staging tester, needs a role on it.
+
+Things to know about Facebook:
+
+- Meta documents PKCE only for an OpenID Connect variant of this flow, which it marks
+  "still in testing", so the backend sends none, and the signed `state` alone ties
+  Facebook's answer to the browser. The callback spends each code at once, and Meta
+  matches the redirect URI exactly over https, so a code would have to leak unused, as
+  from a callback refused for its `state` whose URL an access log kept, and be replayed
+  in time. RFC 9700 says a client MUST prevent code injection, with PKCE or, for an
+  OpenID Connect client, a nonce ([RFC 9700][rfc9700-code], section 2.1.1). This flow
+  sends no PKCE challenge, and the nonce it sends comes back in no ID token to check, so
+  it falls short of that until Meta calls the variant stable; then move to it, with
+  `openid` in the scopes and the ID token checked as Google's is.
+- A person may untick the email permission, and an account opened with a phone number
+  may have no address; either ends at `email_required`, whose message asks the person
+  to share the address and try again, or to sign in another way. The dialog carries
+  `auth_type=rerequest`, so the next try asks for the email again ([Meta][fb-manual]).
+  Meta warns of "Developer Alerts if your app repeatedly directs users to permissions
+  dialogs after they deny permissions" ([Meta][fb-permissions]); the backend never
+  sends anyone back on its own.
+- Data access lapses 90 days after a person last used the app. Meta says "To regain
+  data access, your app must ask the user to re-authorize", on the web with
+  `auth_type=reauthorize` ([Meta][fb-data-access]), and does not say whether an ordinary
+  sign-in renews it or what `/me` answers meanwhile. A returning sign-in needs only the
+  `id`, matched by subject, but a person away that long may see `exchange_failed`, with
+  the Graph API's status in the backend's log.
+- `FACEBOOK_GRAPH_VERSION` names Graph API v27.0. Meta guarantees a version for at least
+  two years; two years after the next one ships, it answers calls naming v27.0 with the
+  oldest version it still serves, and it does not say what the Login Dialog then does
+  ([Meta][fb-versions]), so move the constant, and the test that pins it, before then.
+- A test app keeps the settings it was made with: a later change to production's app
+  reaches no test app until someone makes it there too ([Meta][fb-test-apps]).
+- A wrong app secret shows up only as `exchange_failed`, with a 400 from the token
+  endpoint in the backend's log, and a refused profile lookup logs its status the same
+  way. A wrong App ID, or a callback missing from Valid OAuth Redirect URIs, should
+  stop on Facebook's own page, since RFC 6749 forbids redirecting for either
+  ([RFC 6749][rfc6749], section 4.1.2.1).
+- Unlinking Facebook here does not remove the app from the person's Facebook settings,
+  and Meta's deauthorize and data deletion callbacks are not received. Accounts here are
+  deactivated, never deleted, so a deletion request is the project's to answer: remove
+  the link with the SQL in "The linking policy", and decide whether the account goes too.
+
+[fb-user]: https://developers.facebook.com/docs/graph-api/reference/user
+[fb-security]: https://developers.facebook.com/docs/facebook-login/security
+[fb-basic]: https://developers.facebook.com/docs/development/create-an-app/app-dashboard/basic-settings
+[fb-deletion]: https://developers.facebook.com/docs/development/create-an-app/app-dashboard/data-deletion-callback
+[fb-modes]: https://developers.facebook.com/docs/development/build-and-test/app-modes
+[fb-access]: https://developers.facebook.com/docs/graph-api/overview/access-levels
+[fb-manual]: https://developers.facebook.com/docs/facebook-login/guides/advanced/manual-flow
+[fb-data-access]: https://developers.facebook.com/docs/facebook-login/auth-vs-data
+[fb-versions]: https://developers.facebook.com/docs/graph-api/guides/versioning
+[fb-test-apps]: https://developers.facebook.com/docs/development/build-and-test/test-apps
+[fb-permissions]: https://developers.facebook.com/docs/facebook-login/guides/permissions/request-revoke
+[fb-localhost]: https://community.auth0.com/t/problems-with-facebook-login-when-testing-connection/64718
+[rfc9700-code]: https://www.rfc-editor.org/rfc/rfc9700#section-2.1.1
+[rfc6749]: https://www.rfc-editor.org/rfc/rfc6749#section-4.1.2.1
 
 ## Passkeys
 

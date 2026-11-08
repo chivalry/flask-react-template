@@ -15,7 +15,11 @@ const MESSAGES: [string, string][] = [
     ['expired', 'That sign-in took too long. Please try again.'],
     ['exchange_failed', 'The sign-in provider could not finish. Please try again.'],
     ['invalid_token', 'The sign-in could not be verified. Please try again.'],
-    ['email_required', 'The sign-in provider did not share an email address.'],
+    [
+        'email_required',
+        'The sign-in provider did not share an email address, which every account here ' +
+            'needs. Share it and try again, or sign in another way.',
+    ],
     ['email_unverified', 'Verify your email with the sign-in provider, then try again.'],
     [
         'link_required',

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { listProviders } from '../../../api/oauth'
 import ProviderButtons from '../../../components/auth/ProviderButtons'
-import { appleProvider, googleProvider } from '../../utils/fixtures'
+import { appleProvider, facebookProvider, googleProvider } from '../../utils/fixtures'
 
 vi.mock('../../../api/oauth')
 
@@ -29,15 +29,23 @@ describe('ProviderButtons', () => {
     })
 
     it('links every enabled provider, in the order the server lists them', async () => {
-        vi.mocked(listProviders).mockResolvedValue([googleProvider, appleProvider])
+        vi.mocked(listProviders).mockResolvedValue([
+            googleProvider,
+            appleProvider,
+            facebookProvider,
+        ])
 
         render(<ProviderButtons next="/" />)
 
         const apple = await screen.findByRole('link', { name: 'Continue with Apple' })
         expect(apple).toHaveAttribute('href', '/api/v1/auth/oauth/apple/start?next=%2F')
+        expect(
+            screen.getByRole('link', { name: 'Continue with Facebook' }),
+        ).toHaveAttribute('href', '/api/v1/auth/oauth/facebook/start?next=%2F')
         expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual([
             'Continue with Google',
             'Continue with Apple',
+            'Continue with Facebook',
         ])
     })
 
