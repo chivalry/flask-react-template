@@ -60,12 +60,16 @@ to put new behavior in the right service.
   `APPLE_ID_TOKEN_CLAIMS` makes a token it signs Apple's
 - `apple` - adds Sign in with Apple to the `app` fixture's registry, built from
   `APPLE_ENVIRONMENT` with a P-256 key made once per run
+- `facebook` - adds Facebook to the `app` fixture's registry, built from
+  `FACEBOOK_ENVIRONMENT`; it brings `mocked_http`, which refuses any call a test has not
+  answered
 - `_clear_app_environment` - an autouse fixture that clears `APP_ENVIRONMENT`, so a
   developer's `.env` cannot rename the session cookie
 - `_clear_smtp_environment` - an autouse fixture that clears the `SMTP_*` variables, so
   every test starts with mail off and a developer's `.env` cannot make one send mail
 - `_clear_oauth_environment` and `_clear_jwks_cache` - autouse fixtures that clear the
-  `OAUTH_GOOGLE_*` and `OAUTH_APPLE_*` keys and the JWKS cache for every test
+  `OAUTH_GOOGLE_*`, `OAUTH_APPLE_*`, and `OAUTH_FACEBOOK_*` keys and the JWKS cache for
+  every test
 
 The `app` fixture sets `app.test_client_class` to `SpaTestClient`, so every client the
 tests build, `app.test_client()` included, sends `X-Requested-With: XMLHttpRequest` as

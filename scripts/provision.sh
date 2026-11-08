@@ -133,6 +133,11 @@ OAUTH_APPLE_CLIENT_ID=
 OAUTH_APPLE_TEAM_ID=
 OAUTH_APPLE_KEY_ID=
 OAUTH_APPLE_PRIVATE_KEY=
+# Facebook appears once both keys are set. Add
+# https://$DOMAIN/api/v1/auth/oauth/facebook/callback to the Meta app's Valid OAuth
+# Redirect URIs (ai/auth.md, "Setting up Facebook").
+OAUTH_FACEBOOK_CLIENT_ID=
+OAUTH_FACEBOOK_CLIENT_SECRET=
 
 # --- Loopback ports published by Compose; host nginx proxies to them -------------
 BACKEND_PORT=5000
@@ -171,6 +176,7 @@ ENV
   echo "    Mail stays off until SMTP_HOST and the other SMTP_* values are filled in."
   echo "    Google sign-in stays off until OAUTH_GOOGLE_* are filled in."
   echo "    Sign in with Apple stays off until all four OAUTH_APPLE_* are filled in."
+  echo "    Facebook sign-in stays off until both OAUTH_FACEBOOK_* are filled in."
   echo "    Fill in ADMIN_EMAIL before the first deploy; that admin signs in with the"
   echo "    generated ADMIN_PASSWORD."
 fi

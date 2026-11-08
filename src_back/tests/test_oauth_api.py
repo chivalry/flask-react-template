@@ -19,6 +19,8 @@ from src_back.services import oauth as oauth_service
 from src_back.services.auth import LAST_METHOD, find_user_by_email
 from src_back.services.oauth_providers import (
     APPLE_TOKEN_URL,
+    FACEBOOK_PROFILE_URL,
+    FACEBOOK_TOKEN_URL,
     GOOGLE_TOKEN_URL,
     OAuthProvider,
 )
@@ -33,6 +35,8 @@ from src_back.tests.conftest import (
     APPLE_CLIENT_ID,
     APPLE_ID_TOKEN_CLAIMS,
     APPLE_PRIVATE_KEY,
+    FACEBOOK_CLIENT_ID,
+    FACEBOOK_CLIENT_SECRET,
     OAUTH_CLIENT_ID,
     OidcSigner,
 )
@@ -59,6 +63,13 @@ APPLE_VERIFIED: dict[str, Any] = {'email': APPLE_EMAIL, 'email_verified': 'true'
 FIRST_ANSWER = json.dumps(
     {'name': {'firstName': 'Maria', 'lastName': 'Ruiz'}, 'email': 'other@example.com'}
 )
+FACEBOOK_CALLBACK_URL = f'{OAUTH_URL}/facebook/callback'
+FACEBOOK_EMAIL = 'sam@example.com'
+FACEBOOK_PROFILE: dict[str, Any] = {
+    'id': '10101',
+    'name': 'Sam Lee',
+    'email': FACEBOOK_EMAIL,
+}
 
 
 def begin(
@@ -150,6 +161,27 @@ def sign_in_with_apple(
     answer_apple_token_request(mocked_http, signer, params['nonce'])
     form = {'code': 'the-code', 'state': params['state'], **fields}
     return post_apple_answer(client, form)
+
+
+def answer_facebook(mocked_http: responses.RequestsMock, profile: dict[str, Any]) -> None:
+    # The token response Meta documents, then the profile lookup's answer.
+    tokens = {'access_token': 'the-access-token', 'token_type': 'bearer'}
+    mocked_http.add(responses.POST, FACEBOOK_TOKEN_URL, json=tokens)
+    mocked_http.add(responses.GET, FACEBOOK_PROFILE_URL, json=profile)
+
+
+def sign_in_with_facebook(
+    client: FlaskClient,
+    mocked_http: responses.RequestsMock,
+    profile: dict[str, Any],
+    *,
+    headers: dict[str, str] | None = None,
+    **query: str,
+) -> TestResponse:
+    params = begin(client, provider='facebook', headers=headers, **query)
+    answer_facebook(mocked_http, profile)
+    answer = {'code': 'the-code', 'state': params['state']}
+    return client.get(FACEBOOK_CALLBACK_URL, query_string=answer)
 
 
 def transaction_in(app: Flask, client: FlaskClient) -> OAuthTransaction:
@@ -1204,3 +1236,159 @@ def test_linking_apple_from_the_account_page_keeps_the_name(
     link = db.session.query(OAuthAccount).one()
     assert (link.user_id, link.provider) == (user.id, 'apple')
     assert link.display_name == 'Maria Ruiz'
+
+
+# Facebook Login
+
+
+def test_providers_lists_facebook_after_google(
+    client: FlaskClient, facebook: OAuthProvider
+) -> None:
+    assert client.get(f'{OAUTH_URL}/providers').get_json() == [
+        {'name': 'google', 'label': 'Google'},
+        {'name': 'facebook', 'label': 'Facebook'},
+    ]
+
+
+def test_facebooks_start_asks_again_for_a_declined_email_and_keeps_no_verifier(
+    app: Flask, client: FlaskClient, facebook: OAuthProvider
+) -> None:
+    params = begin(client, provider='facebook')
+    assert params['client_id'] == FACEBOOK_CLIENT_ID
+    assert params['redirect_uri'] == f'{ORIGIN}/api/v1/auth/oauth/facebook/callback'
+    assert params['scope'] == 'public_profile email'
+    assert params['auth_type'] == 'rerequest'
+    assert 'code_challenge' not in params
+    assert transaction_in(app, client).code_verifier is None
+
+
+def test_a_first_facebook_sign_in_makes_an_account(
+    client: FlaskClient,
+    db: SQLAlchemy,
+    mocked_http: responses.RequestsMock,
+    facebook: OAuthProvider,
+) -> None:
+    response = sign_in_with_facebook(client, mocked_http, FACEBOOK_PROFILE)
+    assert redirect_location(response) == f'{ORIGIN}/'
+    assert not has_transaction_cookie(client)
+    assert me_from_the_session_cookie(client).get_json()['email'] == FACEBOOK_EMAIL
+    # Only committed rows survive a rollback.
+    db.session.rollback()
+    link = db.session.query(OAuthAccount).one()
+    assert (link.provider, link.provider_user_id) == ('facebook', '10101')
+    assert (link.email, link.display_name) == (FACEBOOK_EMAIL, 'Sam Lee')
+    assert link.user.has_password is False
+
+
+def test_facebooks_token_request_carries_the_secret_and_no_verifier(
+    client: FlaskClient,
+    mocked_http: responses.RequestsMock,
+    facebook: OAuthProvider,
+) -> None:
+    sign_in_with_facebook(client, mocked_http, FACEBOOK_PROFILE)
+    body = token_request_body(mocked_http, FACEBOOK_TOKEN_URL)
+    assert body['client_id'] == FACEBOOK_CLIENT_ID
+    assert body['client_secret'] == FACEBOOK_CLIENT_SECRET
+    assert body['code'] == 'the-code'
+    assert body['redirect_uri'] == f'{ORIGIN}/api/v1/auth/oauth/facebook/callback'
+    assert 'code_verifier' not in body
+
+
+def test_a_declined_facebook_email_is_email_required(
+    client: FlaskClient,
+    db: SQLAlchemy,
+    mocked_http: responses.RequestsMock,
+    facebook: OAuthProvider,
+) -> None:
+    profile = {'id': '10101', 'name': 'Sam Lee'}
+    response = sign_in_with_facebook(client, mocked_http, profile)
+    assert redirect_location(response) == f'{ORIGIN}/login?error=email_required'
+    assert not has_transaction_cookie(client)
+    db.session.rollback()
+    assert db.session.query(User).count() == 0
+    assert link_count(db) == 0
+
+
+def test_a_returning_facebook_sign_in_needs_no_email(
+    client: FlaskClient,
+    db: SQLAlchemy,
+    mocked_http: responses.RequestsMock,
+    facebook: OAuthProvider,
+) -> None:
+    # The subject decides before the email does, so a person who later removes the
+    # email permission still reaches the account it made.
+    sign_in_with_facebook(client, mocked_http, FACEBOOK_PROFILE)
+    response = sign_in_with_facebook(client, mocked_http, {'id': '10101'})
+    assert redirect_location(response) == f'{ORIGIN}/'
+    assert me_from_the_session_cookie(client).get_json()['email'] == FACEBOOK_EMAIL
+    db.session.rollback()
+    assert db.session.query(User).count() == 1
+
+
+def test_a_facebook_email_an_account_holds_is_link_required(
+    client: FlaskClient,
+    db: SQLAlchemy,
+    user: User,
+    mocked_http: responses.RequestsMock,
+    facebook: OAuthProvider,
+) -> None:
+    # Facebook's address counts as verified and still attaches to no existing account.
+    profile = {**FACEBOOK_PROFILE, 'email': user.email}
+    response = sign_in_with_facebook(client, mocked_http, profile)
+    assert redirect_location(response) == f'{ORIGIN}/login?error=link_required'
+    assert link_count(db) == 0
+
+
+def test_a_cancelled_facebook_sign_in_is_cancelled(
+    client: FlaskClient, mocked_http: responses.RequestsMock, facebook: OAuthProvider
+) -> None:
+    params = begin(client, provider='facebook')
+    # Meta's documented decline, plus the error_code and the transaction's state that
+    # its example leaves out.
+    answer = {
+        'error': 'access_denied',
+        'error_code': '200',
+        'error_description': 'Permissions error.',
+        'error_reason': 'user_denied',
+        'state': params['state'],
+    }
+    response = client.get(FACEBOOK_CALLBACK_URL, query_string=answer)
+    assert redirect_location(response) == f'{ORIGIN}/login?error=cancelled'
+    assert not has_transaction_cookie(client)
+    assert len(mocked_http.calls) == 0
+
+
+def test_a_refused_facebook_profile_lookup_is_exchange_failed(
+    client: FlaskClient,
+    db: SQLAlchemy,
+    mocked_http: responses.RequestsMock,
+    facebook: OAuthProvider,
+) -> None:
+    params = begin(client, provider='facebook')
+    tokens = {'access_token': 'the-access-token', 'token_type': 'bearer'}
+    mocked_http.add(responses.POST, FACEBOOK_TOKEN_URL, json=tokens)
+    refusal = {'error': {'message': 'Invalid OAuth access token.', 'code': 190}}
+    mocked_http.add(responses.GET, FACEBOOK_PROFILE_URL, status=400, json=refusal)
+    answer = {'code': 'the-code', 'state': params['state']}
+    response = client.get(FACEBOOK_CALLBACK_URL, query_string=answer)
+    assert redirect_location(response) == f'{ORIGIN}/login?error=exchange_failed'
+    assert not has_transaction_cookie(client)
+    db.session.rollback()
+    assert db.session.query(User).count() == 0
+
+
+def test_linking_facebook_from_the_account_page(
+    auth_client: FlaskClient,
+    user: User,
+    db: SQLAlchemy,
+    mocked_http: responses.RequestsMock,
+    facebook: OAuthProvider,
+) -> None:
+    response = sign_in_with_facebook(
+        auth_client, mocked_http, FACEBOOK_PROFILE, headers=SAME_ORIGIN, link='1'
+    )
+    assert redirect_location(response) == f'{ORIGIN}/account'
+    db.session.rollback()
+    link = db.session.query(OAuthAccount).one()
+    assert (link.user_id, link.provider) == (user.id, 'facebook')
+    assert link.email == FACEBOOK_EMAIL

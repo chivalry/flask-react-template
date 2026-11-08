@@ -37,6 +37,9 @@ export const googleProvider: OAuthProviderInfo = { name: 'google', label: 'Googl
 /** Apple, as the providers route lists it once its four keys are set over https. */
 export const appleProvider: OAuthProviderInfo = { name: 'apple', label: 'Apple' }
 
+/** Facebook, as the providers route lists it once both of its keys are set. */
+export const facebookProvider: OAuthProviderInfo = { name: 'facebook', label: 'Facebook' }
+
 /** The signed-in account's link to a Google identity with an address of its own. */
 export const linkedGoogleAccount: LinkedAccount = {
     id: 1,

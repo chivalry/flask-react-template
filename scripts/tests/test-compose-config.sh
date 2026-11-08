@@ -3,15 +3,15 @@
 # development stack carries file watch, watchdog, and backend source owned by the app
 # user, that every watched path exists and migrations sync without restarting the
 # backend, that neither stack overrides the image's user, that both pass the .env's
-# SMTP_*, OAUTH_GOOGLE_*, and OAUTH_APPLE_* variables to the backend, blank when unset,
-# and Apple's private key, from a one-line value in the env file itself, with its line
-# breaks, and what the production stack must keep: loopback-only ports and no database
-# port; a backend that runs docker/entrypoint.sh under FLASK_ENV=production, where it
-# starts gunicorn, with GUNICORN_WORKERS, secure session cookies, and the .env's
-# APP_ENVIRONMENT passed through, blank when unset; and the nginx frontend. It needs the
-# docker CLI with Compose, and jq, but no daemon; without them it exits 77, which
-# scripts/tests/run-all.sh counts as a skip outside CI. It runs under macOS's bash 3.2
-# and on Linux.
+# SMTP_*, OAUTH_GOOGLE_*, OAUTH_APPLE_*, and OAUTH_FACEBOOK_* variables to the backend,
+# blank when unset, and Apple's private key, from a one-line value in the env file
+# itself, with its line breaks, and what the production stack must keep: loopback-only
+# ports and no database port; a backend that runs docker/entrypoint.sh under
+# FLASK_ENV=production, where it starts gunicorn, with GUNICORN_WORKERS, secure session
+# cookies, and the .env's APP_ENVIRONMENT passed through, blank when unset; and the
+# nginx frontend. It needs the docker CLI with Compose, and jq, but no daemon; without
+# them it exits 77, which scripts/tests/run-all.sh counts as a skip outside CI. It runs
+# under macOS's bash 3.2 and on Linux.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 if ! docker compose version > /dev/null 2>&1 || ! command -v jq > /dev/null; then
@@ -27,7 +27,8 @@ trap 'rm -rf "$TEST_DIR"' EXIT
 unset COMPOSE_FILE GUNICORN_WORKERS SESSION_COOKIE_SECURE SESSION_COOKIE_SAMESITE \
   APP_ENVIRONMENT SMTP_HOST SMTP_PORT SMTP_SECURITY SMTP_USERNAME SMTP_PASSWORD \
   SMTP_FROM OAUTH_GOOGLE_CLIENT_ID OAUTH_GOOGLE_CLIENT_SECRET OAUTH_APPLE_CLIENT_ID \
-  OAUTH_APPLE_TEAM_ID OAUTH_APPLE_KEY_ID OAUTH_APPLE_PRIVATE_KEY
+  OAUTH_APPLE_TEAM_ID OAUTH_APPLE_KEY_ID OAUTH_APPLE_PRIVATE_KEY \
+  OAUTH_FACEBOOK_CLIENT_ID OAUTH_FACEBOOK_CLIENT_SECRET
 : > "$TEST_DIR/empty.env"
 export POSTGRES_USER=app POSTGRES_PASSWORD=app POSTGRES_DB=app SECRET_KEY=placeholder \
   DATABASE_URL=postgresql://app:app@db:5432/app CORS_ALLOWED_ORIGINS=http://localhost \
@@ -59,7 +60,8 @@ render -f docker-compose.yml -f docker/docker-compose.prod.yml > "$TEST_DIR/prod
 (
   export OAUTH_GOOGLE_CLIENT_ID=google-id OAUTH_GOOGLE_CLIENT_SECRET=google-secret \
     OAUTH_APPLE_CLIENT_ID=com.example.web OAUTH_APPLE_TEAM_ID=TEAMID1234 \
-    OAUTH_APPLE_KEY_ID=KEYID12345 OAUTH_APPLE_PRIVATE_KEY=apple-key
+    OAUTH_APPLE_KEY_ID=KEYID12345 OAUTH_APPLE_PRIVATE_KEY=apple-key \
+    OAUTH_FACEBOOK_CLIENT_ID=facebook-id OAUTH_FACEBOOK_CLIENT_SECRET=facebook-secret
   render > "$TEST_DIR/dev-oauth.json"
   render -f docker-compose.yml -f docker/docker-compose.prod.yml \
     > "$TEST_DIR/prod-oauth.json"
@@ -168,6 +170,13 @@ for stack in dev prod; do
     and .OAUTH_APPLE_TEAM_ID == "TEAMID1234" and .OAUTH_APPLE_KEY_ID == "KEYID12345"
     and .OAUTH_APPLE_PRIVATE_KEY == "apple-key"' \
     'the OAUTH_APPLE_* variables its .env gives passed through to the backend'
+  check "$stack" '.services.backend.environment | .OAUTH_FACEBOOK_CLIENT_ID == ""
+    and .OAUTH_FACEBOOK_CLIENT_SECRET == ""' \
+    'blank OAUTH_FACEBOOK_* variables, which leave Facebook sign-in off'
+  check "$stack-oauth" '.services.backend.environment
+    | .OAUTH_FACEBOOK_CLIENT_ID == "facebook-id"
+    and .OAUTH_FACEBOOK_CLIENT_SECRET == "facebook-secret"' \
+    'the OAUTH_FACEBOOK_* variables its .env gives passed through to the backend'
   check "$stack-key" '.services.backend.environment.OAUTH_APPLE_PRIVATE_KEY
     == "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n"' \
     'a one-line private key from its env file, with its line breaks'
